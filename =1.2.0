@@ -1,0 +1,8 @@
+Collecting xformers
+  Using cached xformers-0.0.35-py39-none-manylinux_2_28_x86_64.whl.metadata (1.2 kB)
+Collecting flash-attn
+  Using cached flash_attn-2.8.3.tar.gz (8.4 MB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'error'

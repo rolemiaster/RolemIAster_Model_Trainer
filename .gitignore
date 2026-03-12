@@ -1,0 +1,90 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environment
+.env
+.venv
+.venv_backup_stable
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.windsurf/
+.agent/
+
+# IDEs and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Project specific
+logs/
+*.log
+temp_test*/
+output_model/
+outputs/
+test_dl/
+unsloth_compiled_cache/
+causal-conv1d/
+triton-windows/
+Backups/
+crash_dump*.txt
+*.zip
+vendor_wheels/
+*_exports.txt
+imports.txt
+missing_symbols.txt
+dependents.txt
+session_test.txt
+untracked*.txt
+
+# AI Models and Weights
+*.safetensors
+*.gguf
+*.bin
+model.safetensors.index.json
+model-0000*
+input_model/*/*/
+
+# Local debug and test scripts
+test_*.py
+test_*.ps1
+test_*.bat
+test_*.txt
+dump_*.bat
+check_*.py
+find_*.py
+demangle.bat
+
+# Engine-specific local environments/dependencies
+# (Excluded by default in standard Python repos, but kept here because
+# they contain custom-compiled DLLs and mixed versions crucial for the project's operation).

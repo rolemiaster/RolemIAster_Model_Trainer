@@ -1,0 +1,33 @@
+{
+  "engine_index": 0,
+  "rank": 64,
+  "alpha": 128,
+  "batch_size": 1,
+  "epochs": 3,
+  "learning_rate": 5e-05,
+  "md_file": "D:\\PROGRAMACION\\ABAFE_Models_Trainer\\input_model\\reglas_base.md",
+  "model_file": "D:\\PROGRAMACION\\ABAFE_Models_Trainer\\input_model\\Qwen_Qwen3.5-27B",
+  "testbench_model_ref": "D:/PROGRAMACION/ABAFE_Models_Trainer/output_model/Qwen_Qwen3.5-9B.Q4_K_M_RolemIAster.gguf",
+  "testbench_rules_path": "D:/PROGRAMACION/ABAFE_Models_Trainer/input_model/reglas_base.md",
+  "testbench_enable_fallback": false,
+  "testbench_min_first": 85.0,
+  "testbench_min_final": 95.0,
+  "testbench_max_fallback": 20.0,
+  "testbench_n_ctx": 30000,
+  "testbench_max_tokens": 4092,
+  "testbench_temperature": 0.2,
+  "testbench_case_count": 10,
+  "testbench_enable_narrative_gate": true,
+  "testbench_min_narrative_score": 70.0,
+  "testbench_max_narrative_hard_fail_rate": 5.0,
+  "testbench_prompt_mode": "isolated",
+  "testbench_run_all_modes": true,
+  "testbench_selected_cases": [
+    "exploration_core",
+    "npc_service_contract",
+    "combat_action_contract",
+    "location_prefix",
+    "safety_npc_limit",
+    "item_valid_slots"
+  ]
+}

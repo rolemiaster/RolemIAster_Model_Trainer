@@ -1,0 +1,276 @@
+[SMART CONFIG] Profile applied: SMALL (R=32, A=64, B=4, Ep=5, LR=0.0002)
+Downloading... Qwen/Qwen3-4B
+>>> STARTING DOWNLOAD: Qwen/Qwen3-4B <<<
+log_download_start
+[SMART CONFIG] Profile applied: SMALL (R=32, A=64, B=4, Ep=5, LR=0.0002)
+log_download_complete
+Download complete: C:\Users\AiCraig\Desktop\AI\Trainer\ABAFE_Models_Trainer_V1.0.5\ABAFE_Models_Trainer\input_model\Qwen_Qwen3-4B
+Added to queue: reglas_base.md
+--- Processing queue item 1/1 ---
+>>> STARTING TRAINING PROCESS <<<
+Rules: reglas_base.md
+Model: Qwen_Qwen3-4B
+log_engine_started
+log_generating_dataset
+[DATASET][AUDIT] rows=5000 | valid=5000 | invalid=0
+log_dataset_generated
+log_detected_hf
+log_starting_unsloth
+log_executing_worker
+[Unsloth] torch\cuda\__init__.py:235: UserWarning:
+[Unsloth] NVIDIA GeForce RTX 5060 Ti with CUDA capability sm_120 is not compatible with the current PyTorch installation.
+[Unsloth] The current PyTorch install supports CUDA capabilities sm_50 sm_60 sm_61 sm_70 sm_75 sm_80 sm_86 sm_90.
+[Unsloth] If you want to use the NVIDIA GeForce RTX 5060 Ti GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+[Unsloth] warnings.warn(
+[Unsloth] pyimod02_importers.py:457: UserWarning: WARNING: Unsloth should be imported before [transformers] to ensure all optimizations are applied. Your code may run slower or encounter memory issues without these optimizations.
+[Unsloth] Please restructure your imports with 'import unsloth' at the top of your file.
+[Unsloth] triton\windows_utils.py:404: UserWarning: Failed to find CUDA.
+[Unsloth] warnings.warn("Failed to find CUDA.")
+[Unsloth] unsloth_zoo\temporary_patches\misc.py:662: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10/cuda/CUDAAllocatorConfig.h:28.)
+[Unsloth] x = torch.randn(1, 4, 8, device=device, dtype=torch.float16)
+[Unsloth] [unsloth_zoo.log|WARNING]Unsloth: Could not patch trl.trainer.grpo_trainer: Direct module loading failed for UnslothGRPOTrainer: Unexpected optimization option triton.enable_persistent_tma_matmul, known options are ['TYPE_CHECKING', 'enable_auto_functionalized_v2', 'debug', 'disable_progress', 'verbose_progress', 'fx_graph_cache', 'fx_graph_remote_cache', 'autotune_local_cache', 'autotune_remote_cache', 'force_disable_caches', 'sleep_sec_TESTING_ONLY', 'custom_op_default_layout_constraint', 'cpp_wrapper', 'abi_compatible', 'c_shim_version', 'dce', 'static_weight_shapes', 'size_asserts', 'nan_asserts', 'pick_loop_orders', 'inplace_buffers', 'allow_buffer_reuse', 'memory_planning', 'memory_pool', 'benchmark_harness', 'epilogue_fusion', 'epilogue_fusion_first', 'pattern_matcher', 'b2b_gemm_pass', 'post_grad_custom_pre_pass', 'post_grad_custom_post_pass', 'joint_custom_pre_pass', 'joint_custom_post_pass', 'pre_grad_custom_pass', '_pre_fusion_custom_pass', 'split_cat_fx_passes', 'efficient_conv_bn_eval_fx_passes', 'is_predispatch', 'group_fusion', 'batch_fusion', 'pre_grad_fusion_options', 'post_grad_fusion_options', 'reorder_for_locality', 'dynamic_scale_rblock', 'force_fuse_int_mm_with_mul', 'use_mixed_mm', 'fx_passes_numeric_check', 'mixed_mm_choice', 'reorder_for_compute_comm_overlap', 'reorder_for_compute_comm_overlap_passes', 'estimate_op_runtime', 'intra_node_bw', 'inter_node_bw', 'max_autotune', 'max_autotune_pointwise', 'max_autotune_gemm', 'force_same_precision', 'max_autotune_gemm_backends', 'max_autotune_conv_backends', 'max_autotune_gemm_search_space', 'autotune_fallback_to_aten', 'unbacked_symint_fallback', 'search_autotune_cache', 'save_args', 'autotune_in_subproc', 'max_autotune_subproc_result_timeout_seconds', 'max_autotune_subproc_graceful_timeout_seconds', 'max_autotune_subproc_terminate_timeout_seconds', 'autotune_multi_device', 'coordinate_descent_tuning', 'coordinate_descent_check_all_directions', 'coordinate_descent_search_radius', 'autoheuristic_collect', 'autoheuristic_use', 'autoheuristic_log_path', 'layout_opt_default', 'layout_optimization', 'force_layout_optimization', 'keep_output_stride', 'warn_mix_layout', 'realize_reads_threshold', 'realize_opcount_threshold', 'realize_acc_reads_threshold', 'fallback_random', 'implicit_fallbacks', 'aggressive_fusion', 'debug_fusion', 'benchmark_fusion', 'enabled_metric_tables', 'loop_ordering_after_fusion', 'benchmark_epilogue_fusion', 'max_epilogue_benchmarked_choices', 'max_fusion_size', 'max_pointwise_cat_inputs', 'unroll_reductions_threshold', 'comment_origin', 'conv_1x1_as_mm', 'split_reductions', 'benchmark_kernel', 'constant_and_index_propagation', 'always_keep_tensor_constants', 'assert_indirect_indexing', 'compute_all_bounds', 'combo_kernels', 'benchmark_combo_kernel', 'combo_kernels_autotune', 'combo_kernel_allow_mixed_sizes', 'combo_kernel_foreach_dynamic_shapes', 'joint_graph_constant_folding', 'debug_index_asserts', 'emulate_precision_casts', 'is_nightly_or_source', 'developer_warnings', 'optimize_scatter_upon_const_tensor', 'worker_start_method', '_fuse_ddp_communication', '_fuse_ddp_bucket_size', '_fuse_ddp_communication_passes', '_micro_pipeline_tp', 'compile_threads', 'global_cache_dir', 'kernel_name_max_ops', 'shape_padding', 'comprehensive_padding', 'pad_channels_last', 'disable_padding_cpu', 'padding_alignment_bytes', 'padding_stride_threshold', 'pad_outputs', 'bw_outputs_user_visible', 'force_shape_pad', 'permute_fusion', 'profiler_mark_wrapper_call', 'generate_intermediate_hooks', 'debug_ir_traceback', '_raise_error_for_testing', '_profile_var', 'profile_bandwidth', 'profile_bandwidth_regex', 'profile_bandwidth_output', 'profile_bandwidth_with_do_bench_using_profiling', 'disable_cpp_codegen', 'freezing', 'freezing_discard_parameters', 'allow_stack_allocation', 'use_minimal_arrayref_interface', 'decompose_mem_bound_mm', 'assume_aligned_inputs', 'unsafe_ignore_unsupported_triton_autotune_args', 'check_stack_no_cycles_TESTING_ONLY', 'cpp.threads', 'cpp.no_redundant_loops', 'cpp.dynamic_threads', 'cpp.simdlen', 'cpp.min_chunk_size', 'cpp.cxx', 'cpp.enable_kernel_profile', 'cpp.weight_prepack', 'cpp.inject_relu_bug_TESTING_ONLY', 'cpp.inject_log1p_bug_TESTING_ONLY', 'cpp.vec_isa_ok', 'cpp.descriptive_names', 'cpp.max_horizontal_fusion_size', 'cpp.fallback_scatter_reduce_sum', 'cpp.enable_unsafe_math_opt_flag', 'cpp.enable_floating_point_contract_flag', 'cpp.enable_tiling_heuristics', 'cpp.gemm_max_k_slices', 'cpp.gemm_cache_blocking', 'cpp.gemm_thread_factors', 'cpp.enable_loop_tail_vec', 'triton.cudagraphs', 'triton.cudagraph_trees', 'triton.cudagraph_skip_dynamic_graphs', 'triton.slow_path_cudagraph_asserts', 'triton.cudagraph_trees_history_recording', 'triton.cudagraph_support_input_mutation', 'triton.cudagraph_unexpected_rerecord_limit', 'triton.cudagraph_dynamic_shape_warn_limit', 'triton.force_cudagraph_sync', 'triton.force_cudagraphs_warmup', 'triton.fast_path_cudagraph_asserts', 'triton.skip_cudagraph_warmup', 'triton.debug_sync_graph', 'triton.debug_sync_kernel', 'triton.dense_indexing', 'triton.max_tiles', 'triton.prefer_nd_tiling', 'triton.autotune_pointwise', 'triton.autotune_cublasLt', 'triton.autotune_at_compile_time', 'triton.tiling_prevents_pointwise_fusion', 'triton.tiling_prevents_reduction_fusion', 'triton.unique_kernel_names', 'triton.descriptive_names', 'triton.persistent_reductions', 'triton.multi_kernel', 'triton.divisible_by_16', 'triton.min_split_scan_rblock', 'triton.store_cubin', 'triton.spill_threshold', 'triton.use_block_ptr', 'triton.inject_relu_bug_TESTING_ONLY', 'triton.codegen_upcast_to_fp32', 'aot_inductor.output_path', 'aot_inductor.debug_compile', 'aot_inductor.debug_dump_consts_bin', 'aot_inductor.debug_intermediate_value_printer', 'aot_inductor.filtered_kernel_names', 'aot_inductor.serialized_in_spec', 'aot_inductor.serialized_out_spec', 'aot_inductor.use_runtime_constant_folding', 'aot_inductor.force_mmap_weights', 'aot_inductor.package', 'cuda.arch', 'cuda.version', 'cuda.compile_opt_level', 'cuda.enable_cuda_lto', 'cuda.enable_ptxas_info', 'cuda.enable_debug_info', 'cuda.use_fast_math', 'cuda.cutlass_dir', 'cuda.cutlass_max_profiling_configs', 'cuda.cuda_cxx', 'cuda.cutlass_backend_min_gemm_size', 'cuda.generate_test_runner', 'cuda.cutlass_op_allowlist_regex', 'cuda.cutlass_op_denylist_regex', 'rocm.arch', 'rocm.ck_supported_arch', 'rocm.compile_opt_level', 'rocm.is_debug', 'rocm.save_temps', 'rocm.use_fast_math', 'rocm.flush_denormals', 'rocm.print_kernel_resource_usage', 'rocm.rocm_home', 'rocm.ck_dir', 'rocm.n_max_profiling_configs', 'rocm.use_preselected_instances', 'cpu_backend', 'cuda_backend', 'halide.cpu_target', 'halide.gpu_target', 'halide.scheduler_cuda', 'halide.scheduler_cpu', 'halide.asserts', 'halide.debug', 'halide.scan_kernels', 'trace.enabled', 'trace.debug_dir', 'trace.debug_log', 'trace.info_log', 'trace.fx_graph', 'trace.fx_graph_transformed', 'trace.ir_pre_fusion', 'trace.ir_post_fusion', 'trace.output_code', 'trace.graph_diagram', 'trace.draw_orig_fx_graph', 'trace.dot_graph_shape', 'trace.log_url_for_graph_xform', 'trace.compile_profile', 'trace.upload_tar', 'trace.log_autotuning_results', '_save_config_ignore', '_cache_config_ignore_prefix']
+[Unsloth] Traceback (most recent call last):
+[Unsloth] File "core\run_unsloth_training.py", line 242, in run_training
+[Unsloth] File "unsloth\models\loader.py", line 704, in from_pretrained
+[Unsloth] model, tokenizer = dispatch_model.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\qwen3.py", line 462, in from_pretrained
+[Unsloth] return FastLlamaModel.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\llama.py", line 2430, in from_pretrained
+[Unsloth] model = AutoModelForCausalLM.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\auto\auto_factory.py", line 374, in from_pretrained
+[Unsloth] return model_class.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\modeling_utils.py", line 4030, in from_pretrained
+[Unsloth] model = cls(config, *model_args, **model_kwargs)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\qwen3\modeling_qwen3.py", line 462, in __init__
+[Unsloth] self.model = Qwen3Model(config)
+[Unsloth] ^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\qwen3\modeling_qwen3.py", line 374, in __init__
+[Unsloth] self.rotary_emb = Qwen3RotaryEmbedding(config=config)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\llama.py", line 1748, in __init__
+[Unsloth] self._set_cos_sin_cache(
+[Unsloth] File "unsloth\models\llama.py", line 1782, in _set_cos_sin_cache
+[Unsloth] cos = emb.cos().to(dtype = dtype, device = device, non_blocking = True)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "torch\utils\_device.py", line 106, in __torch_function__
+[Unsloth] return func(*args, **kwargs)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] RuntimeError: CUDA error: no kernel image is available for execution on the device
+[Unsloth] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[Unsloth] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[Unsloth] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+[Unsloth] During handling of the above exception, another exception occurred:
+[Unsloth] Traceback (most recent call last):
+[Unsloth] File "gui.py", line 1936, in <module>
+[Unsloth] File "core\run_unsloth_training.py", line 873, in run_training_internal
+[Unsloth] File "core\run_unsloth_training.py", line 265, in run_training
+[Unsloth] File "unsloth\models\loader.py", line 704, in from_pretrained
+[Unsloth] model, tokenizer = dispatch_model.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\qwen3.py", line 462, in from_pretrained
+[Unsloth] return FastLlamaModel.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\llama.py", line 2430, in from_pretrained
+[Unsloth] model = AutoModelForCausalLM.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\auto\auto_factory.py", line 374, in from_pretrained
+[Unsloth] return model_class.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\modeling_utils.py", line 4030, in from_pretrained
+[Unsloth] model = cls(config, *model_args, **model_kwargs)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\qwen3\modeling_qwen3.py", line 462, in __init__
+[Unsloth] self.model = Qwen3Model(config)
+[Unsloth] ^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\qwen3\modeling_qwen3.py", line 374, in __init__
+[Unsloth] self.rotary_emb = Qwen3RotaryEmbedding(config=config)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\llama.py", line 1748, in __init__
+[Unsloth] self._set_cos_sin_cache(
+[Unsloth] File "unsloth\models\llama.py", line 1782, in _set_cos_sin_cache
+[Unsloth] cos = emb.cos().to(dtype = dtype, device = device, non_blocking = True)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "torch\utils\_device.py", line 106, in __torch_function__
+[Unsloth] return func(*args, **kwargs)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] RuntimeError: CUDA error: no kernel image is available for execution on the device
+[Unsloth] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[Unsloth] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[Unsloth] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+[Unsloth] [HW] RTX 5000+ (sm_120) detectada. M�dulo 'fla' desactivado globalmente para evitar crash C++.
+[Unsloth] [COMPAT] dtypes torch faltantes aliasados para compatibilidad: int1, int2, int3, int4, int5, int6, int7
+[Unsloth] Unsloth: Will patch your computer to enable 2x faster free finetuning.
+[Unsloth] Unsloth: causal_conv1d CUDA kernels not compatible with this GPU. Using PyTorch slow path for Mamba models.
+[Unsloth] Unsloth Zoo will now patch everything to make training faster!
+[Unsloth] --- log_starting_unsloth_real ---
+[Unsloth] Modelo: C:\Users\AiCraig\Desktop\AI\Trainer\ABAFE_Models_Trainer_V1.0.5\ABAFE_Models_Trainer\input_model\Qwen_Qwen3-4B
+[Unsloth] Dataset: C:\Users\AiCraig\Desktop\AI\Trainer\ABAFE_Models_Trainer_V1.0.5\ABAFE_Models_Trainer\output_model\training_dataset.jsonl
+[Unsloth] Params: {'rank': 32, 'alpha': 64, 'batch_size': 4, 'epochs': 5, 'learning_rate': 0.0002, 'engine': 'auto', 'lang': 'en'}
+[Unsloth] [DATASET][AUDIT] rows=5000 | valid=5000 | invalid=0
+[Unsloth] [HW] VRAM detectada: 15.93 GB
+[Unsloth] log_loading_base_model
+[Unsloth] ==((====))==  Unsloth 2026.3.4: Fast Qwen3 patching. Transformers: 5.2.0.
+[Unsloth] \\   /|    NVIDIA GeForce RTX 5060 Ti. Num GPUs = 2. Max memory: 15.928 GB. Platform: Windows.
+[Unsloth] O^O/ \_/ \    Torch: 2.5.1+cu121. CUDA: 12.0. CUDA Toolkit: 12.1. Triton: 3.6.0
+[Unsloth] \        /    Bfloat16 = TRUE. FA [Xformers = None. FA2 = False]
+[Unsloth] "-____-"     Free license: http://github.com/unslothai/unsloth
+[Unsloth] Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+[Unsloth] =========================================================================
+[Unsloth] [CR�TICO] Fallo de Quantizaci�n 4-bit detectado (BitsAndBytes sin soporte)
+[Unsloth] [CR�TICO] La GPU actual (posiblemente RTX 5000 / sm_120) no es compatible
+[Unsloth] [CR�TICO] con los kernels binarios de la versi�n actual de bitsandbytes.
+[Unsloth] [CR�TICO] Activando Salvavidas: Forzando carga BFLOAT16 nativa a 16-bit...
+[Unsloth] =========================================================================
+[Unsloth] ==((====))==  Unsloth 2026.3.4: Fast Qwen3 patching. Transformers: 5.2.0.
+[Unsloth] \\   /|    NVIDIA GeForce RTX 5060 Ti. Num GPUs = 2. Max memory: 15.928 GB. Platform: Windows.
+[Unsloth] O^O/ \_/ \    Torch: 2.5.1+cu121. CUDA: 12.0. CUDA Toolkit: 12.1. Triton: 3.6.0
+[Unsloth] \        /    Bfloat16 = TRUE. FA [Xformers = None. FA2 = False]
+[Unsloth] "-____-"     Free license: http://github.com/unslothai/unsloth
+[Unsloth] Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+[Unsloth] FATAL WORKER ERROR: CUDA error: no kernel image is available for execution on the device
+[Unsloth] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[Unsloth] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[Unsloth] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+log_process_exit_code
+Training finished with errors...
+Queue processing finished.
+Queue processing finished.
+Added to queue: reglas_base.md
+--- Processing queue item 1/1 ---
+>>> STARTING TRAINING PROCESS <<<
+Rules: reglas_base.md
+Model: Qwen_Qwen3-4B
+log_engine_started
+log_generating_dataset
+[DATASET][AUDIT] rows=5000 | valid=5000 | invalid=0
+log_dataset_generated
+log_detected_hf
+log_starting_unsloth
+log_executing_worker
+[Unsloth] torch\cuda\__init__.py:235: UserWarning:
+[Unsloth] NVIDIA GeForce RTX 5060 Ti with CUDA capability sm_120 is not compatible with the current PyTorch installation.
+[Unsloth] The current PyTorch install supports CUDA capabilities sm_50 sm_60 sm_61 sm_70 sm_75 sm_80 sm_86 sm_90.
+[Unsloth] If you want to use the NVIDIA GeForce RTX 5060 Ti GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+[Unsloth] warnings.warn(
+[Unsloth] pyimod02_importers.py:457: UserWarning: WARNING: Unsloth should be imported before [transformers] to ensure all optimizations are applied. Your code may run slower or encounter memory issues without these optimizations.
+[Unsloth] Please restructure your imports with 'import unsloth' at the top of your file.
+[Unsloth] triton\windows_utils.py:404: UserWarning: Failed to find CUDA.
+[Unsloth] warnings.warn("Failed to find CUDA.")
+[Unsloth] unsloth_zoo\temporary_patches\misc.py:662: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10/cuda/CUDAAllocatorConfig.h:28.)
+[Unsloth] x = torch.randn(1, 4, 8, device=device, dtype=torch.float16)
+[Unsloth] [unsloth_zoo.log|WARNING]Unsloth: Could not patch trl.trainer.grpo_trainer: Direct module loading failed for UnslothGRPOTrainer: Unexpected optimization option triton.enable_persistent_tma_matmul, known options are ['TYPE_CHECKING', 'enable_auto_functionalized_v2', 'debug', 'disable_progress', 'verbose_progress', 'fx_graph_cache', 'fx_graph_remote_cache', 'autotune_local_cache', 'autotune_remote_cache', 'force_disable_caches', 'sleep_sec_TESTING_ONLY', 'custom_op_default_layout_constraint', 'cpp_wrapper', 'abi_compatible', 'c_shim_version', 'dce', 'static_weight_shapes', 'size_asserts', 'nan_asserts', 'pick_loop_orders', 'inplace_buffers', 'allow_buffer_reuse', 'memory_planning', 'memory_pool', 'benchmark_harness', 'epilogue_fusion', 'epilogue_fusion_first', 'pattern_matcher', 'b2b_gemm_pass', 'post_grad_custom_pre_pass', 'post_grad_custom_post_pass', 'joint_custom_pre_pass', 'joint_custom_post_pass', 'pre_grad_custom_pass', '_pre_fusion_custom_pass', 'split_cat_fx_passes', 'efficient_conv_bn_eval_fx_passes', 'is_predispatch', 'group_fusion', 'batch_fusion', 'pre_grad_fusion_options', 'post_grad_fusion_options', 'reorder_for_locality', 'dynamic_scale_rblock', 'force_fuse_int_mm_with_mul', 'use_mixed_mm', 'fx_passes_numeric_check', 'mixed_mm_choice', 'reorder_for_compute_comm_overlap', 'reorder_for_compute_comm_overlap_passes', 'estimate_op_runtime', 'intra_node_bw', 'inter_node_bw', 'max_autotune', 'max_autotune_pointwise', 'max_autotune_gemm', 'force_same_precision', 'max_autotune_gemm_backends', 'max_autotune_conv_backends', 'max_autotune_gemm_search_space', 'autotune_fallback_to_aten', 'unbacked_symint_fallback', 'search_autotune_cache', 'save_args', 'autotune_in_subproc', 'max_autotune_subproc_result_timeout_seconds', 'max_autotune_subproc_graceful_timeout_seconds', 'max_autotune_subproc_terminate_timeout_seconds', 'autotune_multi_device', 'coordinate_descent_tuning', 'coordinate_descent_check_all_directions', 'coordinate_descent_search_radius', 'autoheuristic_collect', 'autoheuristic_use', 'autoheuristic_log_path', 'layout_opt_default', 'layout_optimization', 'force_layout_optimization', 'keep_output_stride', 'warn_mix_layout', 'realize_reads_threshold', 'realize_opcount_threshold', 'realize_acc_reads_threshold', 'fallback_random', 'implicit_fallbacks', 'aggressive_fusion', 'debug_fusion', 'benchmark_fusion', 'enabled_metric_tables', 'loop_ordering_after_fusion', 'benchmark_epilogue_fusion', 'max_epilogue_benchmarked_choices', 'max_fusion_size', 'max_pointwise_cat_inputs', 'unroll_reductions_threshold', 'comment_origin', 'conv_1x1_as_mm', 'split_reductions', 'benchmark_kernel', 'constant_and_index_propagation', 'always_keep_tensor_constants', 'assert_indirect_indexing', 'compute_all_bounds', 'combo_kernels', 'benchmark_combo_kernel', 'combo_kernels_autotune', 'combo_kernel_allow_mixed_sizes', 'combo_kernel_foreach_dynamic_shapes', 'joint_graph_constant_folding', 'debug_index_asserts', 'emulate_precision_casts', 'is_nightly_or_source', 'developer_warnings', 'optimize_scatter_upon_const_tensor', 'worker_start_method', '_fuse_ddp_communication', '_fuse_ddp_bucket_size', '_fuse_ddp_communication_passes', '_micro_pipeline_tp', 'compile_threads', 'global_cache_dir', 'kernel_name_max_ops', 'shape_padding', 'comprehensive_padding', 'pad_channels_last', 'disable_padding_cpu', 'padding_alignment_bytes', 'padding_stride_threshold', 'pad_outputs', 'bw_outputs_user_visible', 'force_shape_pad', 'permute_fusion', 'profiler_mark_wrapper_call', 'generate_intermediate_hooks', 'debug_ir_traceback', '_raise_error_for_testing', '_profile_var', 'profile_bandwidth', 'profile_bandwidth_regex', 'profile_bandwidth_output', 'profile_bandwidth_with_do_bench_using_profiling', 'disable_cpp_codegen', 'freezing', 'freezing_discard_parameters', 'allow_stack_allocation', 'use_minimal_arrayref_interface', 'decompose_mem_bound_mm', 'assume_aligned_inputs', 'unsafe_ignore_unsupported_triton_autotune_args', 'check_stack_no_cycles_TESTING_ONLY', 'cpp.threads', 'cpp.no_redundant_loops', 'cpp.dynamic_threads', 'cpp.simdlen', 'cpp.min_chunk_size', 'cpp.cxx', 'cpp.enable_kernel_profile', 'cpp.weight_prepack', 'cpp.inject_relu_bug_TESTING_ONLY', 'cpp.inject_log1p_bug_TESTING_ONLY', 'cpp.vec_isa_ok', 'cpp.descriptive_names', 'cpp.max_horizontal_fusion_size', 'cpp.fallback_scatter_reduce_sum', 'cpp.enable_unsafe_math_opt_flag', 'cpp.enable_floating_point_contract_flag', 'cpp.enable_tiling_heuristics', 'cpp.gemm_max_k_slices', 'cpp.gemm_cache_blocking', 'cpp.gemm_thread_factors', 'cpp.enable_loop_tail_vec', 'triton.cudagraphs', 'triton.cudagraph_trees', 'triton.cudagraph_skip_dynamic_graphs', 'triton.slow_path_cudagraph_asserts', 'triton.cudagraph_trees_history_recording', 'triton.cudagraph_support_input_mutation', 'triton.cudagraph_unexpected_rerecord_limit', 'triton.cudagraph_dynamic_shape_warn_limit', 'triton.force_cudagraph_sync', 'triton.force_cudagraphs_warmup', 'triton.fast_path_cudagraph_asserts', 'triton.skip_cudagraph_warmup', 'triton.debug_sync_graph', 'triton.debug_sync_kernel', 'triton.dense_indexing', 'triton.max_tiles', 'triton.prefer_nd_tiling', 'triton.autotune_pointwise', 'triton.autotune_cublasLt', 'triton.autotune_at_compile_time', 'triton.tiling_prevents_pointwise_fusion', 'triton.tiling_prevents_reduction_fusion', 'triton.unique_kernel_names', 'triton.descriptive_names', 'triton.persistent_reductions', 'triton.multi_kernel', 'triton.divisible_by_16', 'triton.min_split_scan_rblock', 'triton.store_cubin', 'triton.spill_threshold', 'triton.use_block_ptr', 'triton.inject_relu_bug_TESTING_ONLY', 'triton.codegen_upcast_to_fp32', 'aot_inductor.output_path', 'aot_inductor.debug_compile', 'aot_inductor.debug_dump_consts_bin', 'aot_inductor.debug_intermediate_value_printer', 'aot_inductor.filtered_kernel_names', 'aot_inductor.serialized_in_spec', 'aot_inductor.serialized_out_spec', 'aot_inductor.use_runtime_constant_folding', 'aot_inductor.force_mmap_weights', 'aot_inductor.package', 'cuda.arch', 'cuda.version', 'cuda.compile_opt_level', 'cuda.enable_cuda_lto', 'cuda.enable_ptxas_info', 'cuda.enable_debug_info', 'cuda.use_fast_math', 'cuda.cutlass_dir', 'cuda.cutlass_max_profiling_configs', 'cuda.cuda_cxx', 'cuda.cutlass_backend_min_gemm_size', 'cuda.generate_test_runner', 'cuda.cutlass_op_allowlist_regex', 'cuda.cutlass_op_denylist_regex', 'rocm.arch', 'rocm.ck_supported_arch', 'rocm.compile_opt_level', 'rocm.is_debug', 'rocm.save_temps', 'rocm.use_fast_math', 'rocm.flush_denormals', 'rocm.print_kernel_resource_usage', 'rocm.rocm_home', 'rocm.ck_dir', 'rocm.n_max_profiling_configs', 'rocm.use_preselected_instances', 'cpu_backend', 'cuda_backend', 'halide.cpu_target', 'halide.gpu_target', 'halide.scheduler_cuda', 'halide.scheduler_cpu', 'halide.asserts', 'halide.debug', 'halide.scan_kernels', 'trace.enabled', 'trace.debug_dir', 'trace.debug_log', 'trace.info_log', 'trace.fx_graph', 'trace.fx_graph_transformed', 'trace.ir_pre_fusion', 'trace.ir_post_fusion', 'trace.output_code', 'trace.graph_diagram', 'trace.draw_orig_fx_graph', 'trace.dot_graph_shape', 'trace.log_url_for_graph_xform', 'trace.compile_profile', 'trace.upload_tar', 'trace.log_autotuning_results', '_save_config_ignore', '_cache_config_ignore_prefix']
+[Unsloth] Traceback (most recent call last):
+[Unsloth] File "core\run_unsloth_training.py", line 242, in run_training
+[Unsloth] File "unsloth\models\loader.py", line 704, in from_pretrained
+[Unsloth] model, tokenizer = dispatch_model.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\qwen3.py", line 462, in from_pretrained
+[Unsloth] return FastLlamaModel.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\llama.py", line 2430, in from_pretrained
+[Unsloth] model = AutoModelForCausalLM.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\auto\auto_factory.py", line 374, in from_pretrained
+[Unsloth] return model_class.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\modeling_utils.py", line 4030, in from_pretrained
+[Unsloth] model = cls(config, *model_args, **model_kwargs)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\qwen3\modeling_qwen3.py", line 462, in __init__
+[Unsloth] self.model = Qwen3Model(config)
+[Unsloth] ^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\qwen3\modeling_qwen3.py", line 374, in __init__
+[Unsloth] self.rotary_emb = Qwen3RotaryEmbedding(config=config)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\llama.py", line 1748, in __init__
+[Unsloth] self._set_cos_sin_cache(
+[Unsloth] File "unsloth\models\llama.py", line 1782, in _set_cos_sin_cache
+[Unsloth] cos = emb.cos().to(dtype = dtype, device = device, non_blocking = True)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "torch\utils\_device.py", line 106, in __torch_function__
+[Unsloth] return func(*args, **kwargs)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] RuntimeError: CUDA error: no kernel image is available for execution on the device
+[Unsloth] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[Unsloth] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[Unsloth] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+[Unsloth] During handling of the above exception, another exception occurred:
+[Unsloth] Traceback (most recent call last):
+[Unsloth] File "gui.py", line 1936, in <module>
+[Unsloth] File "core\run_unsloth_training.py", line 873, in run_training_internal
+[Unsloth] File "core\run_unsloth_training.py", line 265, in run_training
+[Unsloth] File "unsloth\models\loader.py", line 704, in from_pretrained
+[Unsloth] model, tokenizer = dispatch_model.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\qwen3.py", line 462, in from_pretrained
+[Unsloth] return FastLlamaModel.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\llama.py", line 2430, in from_pretrained
+[Unsloth] model = AutoModelForCausalLM.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\auto\auto_factory.py", line 374, in from_pretrained
+[Unsloth] return model_class.from_pretrained(
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\modeling_utils.py", line 4030, in from_pretrained
+[Unsloth] model = cls(config, *model_args, **model_kwargs)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\qwen3\modeling_qwen3.py", line 462, in __init__
+[Unsloth] self.model = Qwen3Model(config)
+[Unsloth] ^^^^^^^^^^^^^^^^^^
+[Unsloth] File "transformers\models\qwen3\modeling_qwen3.py", line 374, in __init__
+[Unsloth] self.rotary_emb = Qwen3RotaryEmbedding(config=config)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "unsloth\models\llama.py", line 1748, in __init__
+[Unsloth] self._set_cos_sin_cache(
+[Unsloth] File "unsloth\models\llama.py", line 1782, in _set_cos_sin_cache
+[Unsloth] cos = emb.cos().to(dtype = dtype, device = device, non_blocking = True)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] File "torch\utils\_device.py", line 106, in __torch_function__
+[Unsloth] return func(*args, **kwargs)
+[Unsloth] ^^^^^^^^^^^^^^^^^^^^^
+[Unsloth] RuntimeError: CUDA error: no kernel image is available for execution on the device
+[Unsloth] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[Unsloth] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[Unsloth] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+[Unsloth] [HW] RTX 5000+ (sm_120) detectada. M�dulo 'fla' desactivado globalmente para evitar crash C++.
+[Unsloth] [COMPAT] dtypes torch faltantes aliasados para compatibilidad: int1, int2, int3, int4, int5, int6, int7
+[Unsloth] Unsloth: Will patch your computer to enable 2x faster free finetuning.
+[Unsloth] Unsloth: causal_conv1d CUDA kernels not compatible with this GPU. Using PyTorch slow path for Mamba models.
+[Unsloth] Unsloth Zoo will now patch everything to make training faster!
+[Unsloth] --- log_starting_unsloth_real ---
+[Unsloth] Modelo: C:\Users\AiCraig\Desktop\AI\Trainer\ABAFE_Models_Trainer_V1.0.5\ABAFE_Models_Trainer\input_model\Qwen_Qwen3-4B
+[Unsloth] Dataset: C:\Users\AiCraig\Desktop\AI\Trainer\ABAFE_Models_Trainer_V1.0.5\ABAFE_Models_Trainer\output_model\training_dataset.jsonl
+[Unsloth] Params: {'rank': 32, 'alpha': 64, 'batch_size': 4, 'epochs': 5, 'learning_rate': 0.0002, 'engine': 'auto', 'lang': 'en'}
+[Unsloth] [DATASET][AUDIT] rows=5000 | valid=5000 | invalid=0
+[Unsloth] [HW] VRAM detectada: 15.93 GB
+[Unsloth] log_loading_base_model
+[Unsloth] ==((====))==  Unsloth 2026.3.4: Fast Qwen3 patching. Transformers: 5.2.0.
+[Unsloth] \\   /|    NVIDIA GeForce RTX 5060 Ti. Num GPUs = 2. Max memory: 15.928 GB. Platform: Windows.
+[Unsloth] O^O/ \_/ \    Torch: 2.5.1+cu121. CUDA: 12.0. CUDA Toolkit: 12.1. Triton: 3.6.0
+[Unsloth] \        /    Bfloat16 = TRUE. FA [Xformers = None. FA2 = False]
+[Unsloth] "-____-"     Free license: http://github.com/unslothai/unsloth
+[Unsloth] Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+[Unsloth] =========================================================================
+[Unsloth] [CR�TICO] Fallo de Quantizaci�n 4-bit detectado (BitsAndBytes sin soporte)
+[Unsloth] [CR�TICO] La GPU actual (posiblemente RTX 5000 / sm_120) no es compatible
+[Unsloth] [CR�TICO] con los kernels binarios de la versi�n actual de bitsandbytes.
+[Unsloth] [CR�TICO] Activando Salvavidas: Forzando carga BFLOAT16 nativa a 16-bit...
+[Unsloth] =========================================================================
+[Unsloth] ==((====))==  Unsloth 2026.3.4: Fast Qwen3 patching. Transformers: 5.2.0.
+[Unsloth] \\   /|    NVIDIA GeForce RTX 5060 Ti. Num GPUs = 2. Max memory: 15.928 GB. Platform: Windows.
+[Unsloth] O^O/ \_/ \    Torch: 2.5.1+cu121. CUDA: 12.0. CUDA Toolkit: 12.1. Triton: 3.6.0
+[Unsloth] \        /    Bfloat16 = TRUE. FA [Xformers = None. FA2 = False]
+[Unsloth] "-____-"     Free license: http://github.com/unslothai/unsloth
+[Unsloth] Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+[Unsloth] FATAL WORKER ERROR: CUDA error: no kernel image is available for execution on the device
+[Unsloth] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[Unsloth] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[Unsloth] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+log_process_exit_code
+Training finished with errors...
+Queue processing finished.

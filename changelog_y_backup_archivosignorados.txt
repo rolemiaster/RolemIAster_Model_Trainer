@@ -1,0 +1,30 @@
+.venv
+.venvwin7
+.venv_3.13.3
+Backups
+.git
+.vscode
+__pycache__
+dist
+build
+spec
+*.pyc
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+imagenes_sin_procesar - copia
+src - copia
+publicacion_steam
+deploy/Steamcmd
+models/*.*
+*.gguf
+src/instance_bak
+MCPs
+*.apk
+*.aab
+BUILDS_preparadas
+imput_model
+ouput_model
+unsloth_compiled_cache
+_unsloth_sentencepiece_temp
+outputs

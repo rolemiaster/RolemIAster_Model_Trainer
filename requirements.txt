@@ -1,0 +1,36 @@
+# ===========================================================================
+# DEPENDENCIAS PINADAS — NO CAMBIAR VERSIONES SIN VALIDACIÓN MANUAL
+# Última auditoría: 2026-03-10
+# ===========================================================================
+
+# --- UI ---
+PySide6==6.9.2
+
+# --- ML Core (instalados por requirements.txt) ---
+packaging==26.0
+ninja==1.11.1.4
+einops==0.8.1
+bitsandbytes==0.49.2
+peft==0.18.1
+accelerate==1.13.0
+transformers==5.2.0
+trl==0.24.0
+datasets==4.3.0
+huggingface_hub==1.5.0
+safetensors==0.7.0
+sentencepiece==0.2.1
+tokenizers==0.22.2
+protobuf==7.34.0
+psutil==7.2.2
+requests==2.32.5
+
+# --- Dependencias complejas (instaladas por run_trainer.bat con versión fijada) ---
+# torch==2.5.1+cu121         (Requiere --index-url CUDA)
+# torchaudio==2.5.1+cu121    (Requiere --index-url CUDA)
+# torchvision==0.20.1+cu121  (Requiere --index-url CUDA)
+# torchao==0.16.0            (Instalado con torch)
+# triton-windows==3.6.0.post25
+# unsloth==2026.3.4          (Requiere Torch previo)
+# unsloth_zoo==2026.3.2
+# causal-conv1d==1.4.0       (Requiere compilación MSVC en Windows)
+# flash-linear-attention==0.4.2 (Requiere parche TorchAO sub-byte en Windows)

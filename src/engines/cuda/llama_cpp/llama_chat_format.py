@@ -1,0 +1,5528 @@
+from __future__ import annotations
+
+import base64
+import ctypes
+import dataclasses
+import datetime
+import json
+import os
+import random
+import string
+import sys
+
+from contextlib import ExitStack
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+    Protocol,
+    cast,
+)
+
+import jinja2
+from jinja2.sandbox import ImmutableSandboxedEnvironment
+
+import numpy as np
+import numpy.typing as npt
+
+import urllib.request
+from urllib.error import URLError, HTTPError
+
+import llama_cpp.llama_cpp as llama_cpp
+import llama_cpp.llama as llama
+import llama_cpp.llama_types as llama_types
+import llama_cpp.llama_grammar as llama_grammar
+
+from ._ggml import GGMLLogLevel
+from ._logger import logger, llama_log_callback
+from ._utils import suppress_stdout_stderr, Singleton
+
+### Common Chat Templates and Special Tokens ###
+
+# Source: https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/blob/main/tokenizer_config.json
+CHATML_CHAT_TEMPLATE = "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
+CHATML_BOS_TOKEN = "<s>"
+CHATML_EOS_TOKEN = "<|im_end|>"
+
+# Source: https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1/blob/main/tokenizer_config.json
+MISTRAL_INSTRUCT_CHAT_TEMPLATE = "{{ bos_token }}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}{% endif %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token + ' ' }}{% else %}{{ raise_exception('Only user and assistant roles are supported!') }}{% endif %}{% endfor %}"
+MISTRAL_INSTRUCT_BOS_TOKEN = "<s>"
+MISTRAL_INSTRUCT_EOS_TOKEN = "</s>"
+
+# Source: https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1/blob/main/tokenizer_config.json
+MIXTRAL_INSTRUCT_CHAT_TEMPLATE = "{{ bos_token }}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}{% endif %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token}}{% else %}{{ raise_exception('Only user and assistant roles are supported!') }}{% endif %}{% endfor %}"
+
+# Source: https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct/blob/main/tokenizer_config.json
+LLAMA3_INSTRUCT_CHAT_TEMPLATE = "{% set loop_messages = messages %}{% for message in loop_messages %}{% set content = '<|start_header_id|>' + message['role'] + '<|end_header_id|>\n\n'+ message['content'] | trim + '<|eot_id|>' %}{% if loop.index0 == 0 %}{% set content = bos_token + content %}{% endif %}{{ content }}{% endfor %}{% if add_generation_prompt %}{{ '<|start_header_id|>assistant<|end_header_id|>\n\n' }}{% endif %}"
+
+# Source: https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct/blob/main/tokenizer_config.json
+LLAMA4_INSTRUCT_BOS_TOKEN = "<|begin_of_text|>"
+LLAMA4_INSTRUCT_EOS_TOKEN = "<|eot|>"
+LLAMA4_INSTRUCT_CHAT_TEMPLATE = "{% if custom_tools is defined %}\n    {% set tools = custom_tools %}\n{% endif %}\n{% if not tools_in_user_message is defined %}\n    {% set tools_in_user_message = true %}\n{% endif %}\n{% if not date_string is defined %}\n    {% if strftime_now is defined %}\n        {% set date_string = strftime_now(\"%d %b %Y\") %}\n    {% else %}\n        {% set date_string = \"26 Jul 2024\" %}\n    {% endif %}\n{% endif %}\n{% if not tools is defined %}\n    {% set tools = none %}\n{% endif %}\n\n{#- This block extracts the system message, so we can slot it into the right place. #}\n{% if messages[0]['role'] == 'system' %}    \n    {% if messages[0]['content'] is string %}\n        {% set system_message = messages[0]['content']|trim %}\n    {% else %}\n        {#- FIXME: The processor requires an array, always. #}\n        {% set system_message = messages[0]['content'][0]['text']|trim %}\n    {% endif %}\n    {% set messages = messages[1:] %}\n    {% set user_supplied_system_message = true %}\n{% else %}\n    {% set system_message = \"\" %}\n    {% set user_supplied_system_message = false %}\n{% endif %}\n\n{#- System message if the user supplied one #}\n{% if user_supplied_system_message %}\n    {{ \"<|header_start|>system<|header_end|>\\n\\n\" }}\n    {% if tools is not none %}\n        {{ \"Environment: ipython\\n\" }}\n    {% endif %}\n    {% if tools is not none and not tools_in_user_message %}\n        {{ \"You have access to the following functions. To call a function, please respond with JSON for a function call.\" }}\n        {{ 'Respond in the format {\"name\": function name, \"parameters\": dictionary of argument name and its value}.' }}\n        {{ \"Do not use variables.\\n\\n\" }}\n        {% for t in tools %}\n            {{ t | tojson(indent=4) }}\n            {{ \"\\n\\n\" }}\n        {% endfor %}\n    {% endif %}\n    {{ system_message }}\n    {{ \"<|eot|>\" }}\n{% endif %}\n\n{#- Custom tools are passed in a user message with some extra guidance #}\n{% if tools_in_user_message and not tools is none %}\n    {#- Extract the first user message so we can plug it in here #}\n    {% if messages | length != 0 %}\n        {% set first_user_message = messages[0]['content']|trim %}\n        {% set messages = messages[1:] %}\n    {% else %}\n        {{ raise_exception(\"Cannot put tools in the first user message when there's no first user message!\") }}\n{% endif %}\n    {{ '<|header_start|>user<|header_end|>\\n\\n' -}}\n    {{ \"Given the following functions, please respond with a JSON for a function call \" }}\n    {{ \"with its proper arguments that best answers the given prompt.\\n\\n\" }}\n    {{ 'Respond in the format {\"name\": function name, \"parameters\": dictionary of argument name and its value}.' }}\n    {{ \"Do not use variables.\\n\\n\" }}\n    {% for t in tools %}\n        {{ t | tojson(indent=4) }}\n        {{ \"\\n\\n\" }}\n    {% endfor %}\n    {{ first_user_message + \"<|eot|>\"}}\n{% endif %}\n\n{% for message in messages %}\n    {% if not (message.role == 'ipython' or message.role == 'tool' or 'tool_calls' in message) %}\n    {{ '<|header_start|>' + message['role'] + '<|header_end|>\\n\\n' }}\n        {% if message['content'] is string %}\n            {{ message['content'] }}\n        {% else %}\n            {% for content in message['content'] %}\n                {% if content['type'] == 'image' %}\n                    {{ '<|image|>' }}\n                {% elif content['type'] == 'text' %}\n                    {{ content['text'] }}\n                {% endif %}\n            {% endfor %}\n        {% endif %}\n        {{ \"<|eot|>\" }}\n    {% elif 'tool_calls' in message and message.tool_calls|length > 0 %}\n       {{ '<|header_start|>assistant<|header_end|>\\n\\n' -}}\n       {{ '<|python_start|>' }}\n        {% if message['content'] is string %}\n            {{ message['content'] }}\n        {% else %}\n            {% for content in message['content'] %}\n                {% if content['type'] == 'image' %}\n                    {{ '<|image|>' }}\n                {% elif content['type'] == 'text' %}\n                    {{ content['text'] }}\n                {% endif %}\n            {% endfor %}\n        {% endif %}\n       {{ '<|python_end|>' }}\n        {% for tool_call in message.tool_calls %}\n           {{ '{\"name\": \"' + tool_call.function.name + '\", ' }}\n           {{ '\"parameters\": ' }}\n           {{ tool_call.function.arguments | tojson }}\n           {{ \"}\" }}\n        {% endfor %}\n       {{ \"<|eot|>\" }}\n    {% elif message.role == \"tool\" or message.role == \"ipython\" %}\n        {{ \"<|header_start|>ipython<|header_end|>\\n\\n\" }}\n        {% if message.content is mapping or message.content is iterable %}\n            {{ message.content | tojson }}\n        {% else %}\n            {{ message.content }}\n        {% endif %}\n        {{ \"<|eot|>\" }}\n    {% endif %}\n{% endfor %}\n{% if add_generation_prompt %}\n    {{ '<|header_start|>assistant<|header_end|>\\n\\n' }}\n{% endif %}\n"
+
+
+# Source: https://huggingface.co/openai/gpt-oss-20b/blob/main/tokenizer_config.json
+GPT_OSS_BOS_TOKEN = "<|startoftext|>"
+GPT_OSS_EOS_TOKEN = "<|return|>"
+GPT_OSS_PAD_TOKEN = "<|endoftext|>"
+
+### Chat Completion Handler ###
+
+
+class LlamaChatCompletionHandler(Protocol):
+    """Base Protocol for a llama chat completion handler.
+
+    Very generic protocol that can be used to implement any chat format.
+    The only hard requirement is that it must return a ChatCompletion when
+    stream=False and an iterator of ChatCompletionChunks when stream=True."""
+
+    def __call__(
+        self,
+        *,
+        # llama.cpp instance
+        llama: llama.Llama,
+        # openai api parameters
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        functions: Optional[List[llama_types.ChatCompletionFunction]] = None,
+        function_call: Optional[llama_types.ChatCompletionRequestFunctionCall] = None,
+        tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+        tool_choice: Optional[llama_types.ChatCompletionToolChoiceOption] = None,
+        temperature: float = 0.2,
+        top_p: float = 0.95,
+        top_k: int = 40,
+        top_n_sigma: float = -1.00,
+        stream: bool = False,
+        stop: Optional[Union[str, List[str]]] = [],
+        seed: Optional[int] = None,
+        response_format: Optional[
+            llama_types.ChatCompletionRequestResponseFormat
+        ] = None,
+        max_tokens: Optional[int] = None,
+        present_penalty: float = 0.0,
+        frequency_penalty: float = 0.0,
+        repeat_penalty: float = 1.1,
+        model: Optional[str] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        # llama.cpp parameters
+        min_p: float = 0.05,
+        typical_p: float = 1.0,
+        mirostat_mode: int = 0,
+        mirostat_tau: float = 5.0,
+        mirostat_eta: float = 0.1,
+        xtc_threshold: float = 0.1,
+        xtc_probability: float = 0.0,
+        dry_multiplier: float = 0.0,
+        dry_base: float = 1.75,
+        dry_allowed_length: int = 2,
+        dry_penalty_last_n:int = 0,
+        dry_seq_breakers: list[str] = ["\n", ":", "\"", "*"],
+        adaptive_target : float = -1.0,
+        adaptive_decay : float = 0.9,
+        use_infill: bool = False,
+        logits_processor: Optional[llama.LogitsProcessorList] = None,
+        grammar: Optional[llama.LlamaGrammar] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        **kwargs,  # type: ignore
+    ) -> Union[
+        llama_types.CreateChatCompletionResponse,
+        Iterator[llama_types.CreateChatCompletionStreamResponse],
+    ]: ...
+
+
+class LlamaChatCompletionHandlerNotFoundException(Exception):
+    pass
+
+
+class LlamaChatCompletionHandlerRegistry(Singleton):
+    _chat_handlers: Dict[str, LlamaChatCompletionHandler] = {}
+
+    def register_chat_completion_handler(
+        self,
+        name: str,
+        chat_handler: LlamaChatCompletionHandler,
+        overwrite: bool = False,
+    ):
+        if not overwrite and name in self._chat_handlers:
+            raise ValueError(
+                f"Formatter with name '{name}' is already registered. Use `overwrite=True` to overwrite it."
+            )
+        self._chat_handlers[name] = chat_handler
+
+    def unregister_chat_handler(self, name: str):
+        if name in self._chat_handlers:
+            del self._chat_handlers[name]
+        else:
+            raise ValueError(f"No formatter registered under the name '{name}'.")
+
+    def get_chat_completion_handler_by_name(
+        self, name: str
+    ) -> LlamaChatCompletionHandler:
+        try:
+            chat_handler = self._chat_handlers[name]
+            return chat_handler
+        except KeyError:
+            raise LlamaChatCompletionHandlerNotFoundException(
+                f"Invalid chat handler: {name} (valid formats: {list(self._chat_handlers.keys())})"
+            )
+
+
+def get_chat_completion_handler(name: str) -> LlamaChatCompletionHandler:
+    return LlamaChatCompletionHandlerRegistry().get_chat_completion_handler_by_name(
+        name
+    )
+
+
+def register_chat_completion_handler(name: str):
+    def decorator(f: LlamaChatCompletionHandler):
+        LlamaChatCompletionHandlerRegistry().register_chat_completion_handler(name, f)
+        return f
+
+    return decorator
+
+
+### Chat Formatter ###
+
+
+@dataclasses.dataclass
+class ChatFormatterResponse:
+    """Dataclass that stores completion parameters for a given chat format and
+    create_chat_completion request.
+
+    prompt contains the formatted prompt generated from the chat format and messages.
+    stop contains the stop token or list of stop tokens to use for the chat format."""
+
+    prompt: str
+    stop: Optional[Union[str, List[str]]] = None
+    stopping_criteria: Optional[llama.StoppingCriteriaList] = None
+    added_special: bool = False
+
+
+class ChatFormatter(Protocol):
+    """Base Protocol for a chat formatter. A chat formatter is a function that
+    takes a list of messages and returns a chat format response which can be used
+    to generate a completion. The response can also include a stop token or list
+    of stop tokens to use for the completion."""
+
+    def __call__(
+        self,
+        *,
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        **kwargs: Any,
+    ) -> ChatFormatterResponse: ...
+
+
+class Jinja2ChatFormatter(ChatFormatter):
+    def __init__(
+        self,
+        template: str,
+        eos_token: str,
+        bos_token: str,
+        add_generation_prompt: bool = True,
+        stop_token_ids: Optional[List[int]] = None,
+    ):
+        """A chat formatter that uses jinja2 templates to format the prompt."""
+        self.template = template
+        self.eos_token = eos_token
+        self.bos_token = bos_token
+        self.add_generation_prompt = add_generation_prompt
+        self.stop_token_ids = (
+            set(stop_token_ids) if stop_token_ids is not None else None
+        )
+
+        self._environment = ImmutableSandboxedEnvironment(
+            loader=jinja2.BaseLoader(),
+            trim_blocks=True,
+            lstrip_blocks=True,
+        ).from_string(self.template)
+
+    def __call__(
+        self,
+        *,
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        functions: Optional[List[llama_types.ChatCompletionFunction]] = None,
+        function_call: Optional[llama_types.ChatCompletionRequestFunctionCall] = None,
+        tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+        tool_choice: Optional[llama_types.ChatCompletionToolChoiceOption] = None,
+        **kwargs: Any,
+    ) -> ChatFormatterResponse:
+        def raise_exception(message: str):
+            raise ValueError(message)
+
+        def strftime_now(format_string="%Y-%m-%d %H:%M:%S") -> str:
+            """
+            Returns the current time formatted as a string.
+            """
+            return datetime.datetime.now().strftime(format_string)
+
+        prompt = self._environment.render(
+            messages=messages,
+            eos_token=self.eos_token,
+            bos_token=self.bos_token,
+            raise_exception=raise_exception,
+            strftime_now=strftime_now,
+            add_generation_prompt=self.add_generation_prompt,
+            functions=functions,
+            function_call=function_call,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+
+        stopping_criteria = None
+        if self.stop_token_ids is not None:
+
+            def stop_on_last_token(
+                tokens: npt.NDArray[np.intc], logits: npt.NDArray[np.single]
+            ) -> bool:
+                return tokens[-1] in self.stop_token_ids
+
+            stopping_criteria = llama.StoppingCriteriaList([stop_on_last_token])
+
+        return ChatFormatterResponse(
+            prompt=prompt,
+            stop=[self.eos_token],
+            stopping_criteria=stopping_criteria,
+            added_special=True,
+        )
+
+    def to_chat_handler(self) -> LlamaChatCompletionHandler:
+        return chat_formatter_to_chat_completion_handler(self)
+
+
+def _convert_text_completion_logprobs_to_chat(
+    logprobs: Optional[llama_types.CompletionLogprobs],
+) -> llama_types.ChatCompletionLogprobs:
+    if logprobs is None:
+        return None
+
+    return {
+        "content": [
+            {
+                "token": token,
+                "bytes": None,
+                "logprob": logprob,
+                "top_logprobs": [
+                    {
+                        "token": top_token,
+                        "logprob": top_logprob,
+                        "bytes": None,
+                    }
+                    for top_token, top_logprob in top_logprobs.items()
+                ],
+            } for (token, logprob, top_logprobs) in zip(logprobs["tokens"], logprobs["token_logprobs"], logprobs["top_logprobs"])
+        ],
+        "refusal": None,
+    }
+
+def _convert_text_completion_to_chat(
+    completion: llama_types.Completion,
+) -> llama_types.ChatCompletion:
+    assert "usage" in completion
+    return {
+        "id": "chat" + completion["id"],
+        "object": "chat.completion",
+        "created": completion["created"],
+        "model": completion["model"],
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": completion["choices"][0]["text"],
+                },
+                "logprobs": _convert_text_completion_logprobs_to_chat(completion["choices"][0]["logprobs"]),
+                "finish_reason": completion["choices"][0]["finish_reason"],
+            }
+        ],
+        "usage": completion["usage"],
+    }
+
+
+def _convert_text_completion_chunks_to_chat(
+    chunks: Iterator[llama_types.CreateCompletionStreamResponse],
+) -> Iterator[llama_types.ChatCompletionChunk]:
+    for i, chunk in enumerate(chunks):
+        if i == 0:
+            yield {
+                "id": "chat" + chunk["id"],
+                "model": chunk["model"],
+                "created": chunk["created"],
+                "object": "chat.completion.chunk",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                        },
+                        "logprobs": None,
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        yield {
+            "id": "chat" + chunk["id"],
+            "model": chunk["model"],
+            "created": chunk["created"],
+            "object": "chat.completion.chunk",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": (
+                        {
+                            "content": chunk["choices"][0]["text"],
+                        }
+                        if chunk["choices"][0]["finish_reason"] is None
+                        else {}
+                    ),
+                    "logprobs": _convert_text_completion_logprobs_to_chat(chunk["choices"][0]["logprobs"]),
+                    "finish_reason": chunk["choices"][0]["finish_reason"],
+                }
+            ],
+        }
+
+
+def _convert_completion_to_chat(
+    completion_or_chunks: Union[
+        llama_types.CreateCompletionResponse,
+        Iterator[llama_types.CreateCompletionStreamResponse],
+    ],
+    stream: bool = False,
+) -> Union[
+    llama_types.CreateChatCompletionResponse, Iterator[llama_types.ChatCompletionChunk]
+]:
+    if stream:
+        chunks: Iterator[llama_types.CreateCompletionStreamResponse] = completion_or_chunks  # type: ignore
+        return _convert_text_completion_chunks_to_chat(chunks)
+    else:
+        completion: llama_types.Completion = completion_or_chunks  # type: ignore
+        return _convert_text_completion_to_chat(completion)
+
+
+def _convert_completion_to_chat_function(
+    tool_name: str,
+    completion_or_chunks: Union[
+        llama_types.CreateCompletionResponse,
+        Iterator[llama_types.CreateCompletionStreamResponse],
+    ],
+    stream: bool,
+):
+    if not stream:
+        completion: llama_types.CreateCompletionResponse = completion_or_chunks  # type: ignore
+        assert "usage" in completion
+        tool_id = "call_" + "_0_" + tool_name + "_" + completion["id"]
+        # TODO: Fix for legacy function calls
+        chat_completion: llama_types.CreateChatCompletionResponse = {
+            "id": "chat" + completion["id"],
+            "object": "chat.completion",
+            "created": completion["created"],
+            "model": completion["model"],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": {
+                            "name": tool_name,
+                            "arguments": completion["choices"][0]["text"],
+                        },
+                        "tool_calls": [
+                            {
+                                "id": tool_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": completion["choices"][0]["text"],
+                                },
+                            }
+                        ],
+                    },
+                    "logprobs": _convert_text_completion_logprobs_to_chat(completion["choices"][0]["logprobs"]),
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": completion["usage"],
+        }
+        return chat_completion
+    else:
+        chunks: Iterator[llama_types.CreateCompletionStreamResponse] = completion_or_chunks  # type: ignore
+
+        def _stream_response_to_function_stream(
+            chunks: Iterator[llama_types.CreateCompletionStreamResponse],
+        ) -> Iterator[llama_types.CreateChatCompletionStreamResponse]:
+            # blank first message
+            first = True
+            id_ = None
+            created = None
+            model = None
+            tool_id = None
+            for chunk in chunks:
+                if first:
+                    id_ = "chat" + chunk["id"]
+                    created = chunk["created"]
+                    model = chunk["model"]
+                    tool_id = "call_" + "_0_" + tool_name + "_" + chunk["id"]
+                    yield {
+                        "id": id_,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "finish_reason": None,
+                                "logprobs": None,
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": None,
+                                    "function_call": None,
+                                    "tool_calls": None,
+                                },
+                            }
+                        ],
+                    }
+                    yield {
+                        "id": "chat" + chunk["id"],
+                        "object": "chat.completion.chunk",
+                        "created": chunk["created"],
+                        "model": chunk["model"],
+                        "choices": [
+                            {
+                                "index": 0,
+                                "finish_reason": None,
+                                "logprobs": _convert_text_completion_logprobs_to_chat(chunk["choices"][0]["logprobs"]),
+                                "delta": {
+                                    "role": None,
+                                    "content": None,
+                                    "function_call": {
+                                        "name": tool_name,
+                                        "arguments": chunk["choices"][0]["text"],
+                                    },
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": tool_id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": tool_name,
+                                                "arguments": chunk["choices"][0][
+                                                    "text"
+                                                ],
+                                            },
+                                        }
+                                    ],
+                                },
+                            }
+                        ],
+                    }
+                    first = False
+                    continue
+                assert tool_id is not None
+                yield {
+                    "id": "chat" + chunk["id"],
+                    "object": "chat.completion.chunk",
+                    "created": chunk["created"],
+                    "model": chunk["model"],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": None,
+                            "logprobs": _convert_text_completion_logprobs_to_chat(chunk["choices"][0]["logprobs"]),
+                            "delta": {
+                                "role": None,
+                                "content": None,
+                                "function_call": {
+                                    "name": tool_name,
+                                    "arguments": chunk["choices"][0]["text"],
+                                },
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": tool_id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tool_name,
+                                            "arguments": chunk["choices"][0]["text"],
+                                        },
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+
+            if id_ is not None and created is not None and model is not None:
+                yield {
+                    "id": id_,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "tool_calls",
+                            "logprobs": None,
+                            "delta": {
+                                "role": None,
+                                "content": None,
+                                "function_call": None,
+                                "tool_calls": None,
+                            },
+                        }
+                    ],
+                }
+
+        return _stream_response_to_function_stream(chunks)
+
+
+def chat_formatter_to_chat_completion_handler(
+    chat_formatter: ChatFormatter,
+) -> LlamaChatCompletionHandler:
+    def chat_completion_handler(
+        *,
+        llama: llama.Llama,
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        functions: Optional[List[llama_types.ChatCompletionFunction]] = None,
+        function_call: Optional[llama_types.ChatCompletionRequestFunctionCall] = None,
+        tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+        tool_choice: Optional[llama_types.ChatCompletionToolChoiceOption] = None,
+        temperature: float = 0.2,
+        top_p: float = 0.95,
+        top_k: int = 40,
+        min_p: float = 0.05,
+        typical_p: float = 1.0,
+        stream: bool = False,
+        stop: Optional[Union[str, List[str]]] = [],
+        seed: Optional[int] = None,
+        response_format: Optional[
+            llama_types.ChatCompletionRequestResponseFormat
+        ] = None,
+        max_tokens: Optional[int] = None,
+        present_penalty: float = 0.0,
+        frequency_penalty: float = 0.0,
+        repeat_penalty: float = 1.1,
+        top_n_sigma: float = -1.00,
+        mirostat_mode: int = 0,
+        mirostat_tau: float = 5.0,
+        mirostat_eta: float = 0.1,
+        xtc_threshold: float = 0.1,
+        xtc_probability: float = 0.0,
+        dry_multiplier: float = 0.0,
+        dry_base: float = 1.75,
+        dry_allowed_length: int = 2,
+        dry_penalty_last_n:int = 0,
+        dry_seq_breakers: list[str] = ["\n", ":", "\"", "*"],
+        adaptive_target : float = -1.0,
+        adaptive_decay : float = 0.9,
+        use_infill: bool = False,
+        model: Optional[str] = None,
+        logits_processor: Optional[llama.LogitsProcessorList] = None,
+        grammar: Optional[llama.LlamaGrammar] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        **kwargs,  # type: ignore
+    ) -> Union[
+        llama_types.CreateChatCompletionResponse,
+        Iterator[llama_types.CreateChatCompletionStreamResponse],
+    ]:
+        result = chat_formatter(
+            messages=messages,
+            functions=functions,
+            function_call=function_call,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+        prompt = llama.tokenize(
+            result.prompt.encode("utf-8"),
+            add_bos=not result.added_special,
+            special=True,
+        )
+        if result.stop is not None:
+            stop = [] if stop is None else [stop] if isinstance(stop, str) else stop
+            rstop = result.stop if isinstance(result.stop, list) else [result.stop]
+            stop = stop + rstop
+
+        stopping_criteria = None
+        if result.stopping_criteria is not None:
+            stopping_criteria = result.stopping_criteria
+
+        if response_format is not None and response_format["type"] == "json_object":
+            grammar = _grammar_for_response_format(
+                response_format, verbose=llama.verbose
+            )
+
+        # Convert legacy functions to tools
+        if functions is not None:
+            tools = [
+                {
+                    "type": "function",
+                    "function": function,
+                }
+                for function in functions
+            ]
+
+        # Convert legacy function_call to tool_choice
+        if function_call is not None:
+            if isinstance(function_call, str) and (
+                function_call == "none" or function_call == "auto"
+            ):
+                tool_choice = function_call
+            if isinstance(function_call, dict) and "name" in function_call:
+                tool_choice = {
+                    "type": "function",
+                    "function": {
+                        "name": function_call["name"],
+                    },
+                }
+
+        tool = None
+        if (
+            tool_choice is not None
+            and isinstance(tool_choice, dict)
+            and tools is not None
+        ):
+            name = tool_choice["function"]["name"]
+            tool = next((t for t in tools if t["function"]["name"] == name), None)
+            if tool is None:
+                raise ValueError(f"Tool choice '{name}' not found in tools.")
+            schema = tool["function"]["parameters"]
+            try:
+                # create grammar from json schema
+                grammar = llama_grammar.LlamaGrammar.from_json_schema(
+                    json.dumps(schema), verbose=llama.verbose
+                )
+            except Exception as e:
+                if llama.verbose:
+                    print(str(e), file=sys.stderr)
+                grammar = llama_grammar.LlamaGrammar.from_string(
+                    llama_grammar.JSON_GBNF, verbose=llama.verbose
+                )
+
+        completion_or_chunks = llama.create_completion(
+            prompt=prompt,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            typical_p=typical_p,
+            logprobs=top_logprobs if logprobs else None,
+            stream=stream,
+            stop=stop,
+            seed=seed,
+            max_tokens=max_tokens,
+            present_penalty=present_penalty,
+            frequency_penalty=frequency_penalty,
+            repeat_penalty=repeat_penalty,
+            top_n_sigma=top_n_sigma,
+            mirostat_mode=mirostat_mode,
+            mirostat_tau=mirostat_tau,
+            mirostat_eta=mirostat_eta,
+            xtc_threshold=xtc_threshold,
+            xtc_probability=xtc_probability,
+            dry_multiplier=dry_multiplier,
+            dry_base=dry_base,
+            dry_allowed_length=dry_allowed_length,
+            dry_penalty_last_n=dry_penalty_last_n,
+            dry_seq_breakers=dry_seq_breakers,
+            adaptive_target=adaptive_target,
+            adaptive_decay=adaptive_decay,
+            use_infill=use_infill,
+            model=model,
+            logits_processor=logits_processor,
+            stopping_criteria=stopping_criteria,
+            grammar=grammar,
+            logit_bias=logit_bias,
+        )
+        if tool is not None:
+            tool_name = tool["function"]["name"]
+            return _convert_completion_to_chat_function(
+                tool_name, completion_or_chunks, stream
+            )
+        return _convert_completion_to_chat(completion_or_chunks, stream=stream)
+
+    return chat_completion_handler
+
+
+def hf_autotokenizer_to_chat_formatter(
+    pretrained_model_name_or_path: Union[str, os.PathLike[str]]
+) -> ChatFormatter:
+    # https://huggingface.co/docs/transformers/main/chat_templating
+    # https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1#instruction-format
+    # https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1/blob/main/tokenizer_config.json
+    from transformers import AutoTokenizer  # type: ignore
+
+    tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)  # type: ignore
+
+    def format_autotokenizer(
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        **kwargs: Any,
+    ) -> ChatFormatterResponse:
+        tokenizer.use_default_system_prompt = False  # type: ignore
+        prompt: str = tokenizer.apply_chat_template(messages, tokenize=False)  # type: ignore
+        assert isinstance(prompt, str)
+        # Return formatted prompt and eos token by default
+        return ChatFormatterResponse(
+            prompt=prompt, stop=tokenizer.eos_token, added_special=True
+        )
+
+    return format_autotokenizer
+
+
+def hf_autotokenizer_to_chat_completion_handler(
+    pretrained_model_name_or_path: Union[str, os.PathLike[str]]
+) -> LlamaChatCompletionHandler:
+    chat_formatter = hf_autotokenizer_to_chat_formatter(pretrained_model_name_or_path)
+    return chat_formatter_to_chat_completion_handler(chat_formatter)
+
+
+def hf_tokenizer_config_to_chat_formatter(
+    tokenizer_config: Dict[str, Any],
+    add_generation_prompt: bool = True,
+) -> ChatFormatter:
+    assert isinstance(tokenizer_config, dict)
+
+    assert "chat_template" in tokenizer_config
+    assert isinstance(tokenizer_config["chat_template"], str)
+    chat_template = tokenizer_config["chat_template"]
+
+    assert "bos_token" in tokenizer_config
+    assert isinstance(tokenizer_config["bos_token"], str)
+    bos_token = tokenizer_config["bos_token"]
+
+    assert "eos_token" in tokenizer_config
+    assert isinstance(tokenizer_config["eos_token"], str)
+    eos_token = tokenizer_config["eos_token"]
+
+    env = ImmutableSandboxedEnvironment(
+        trim_blocks=True,
+        lstrip_blocks=True,
+    ).from_string(chat_template)
+
+    def format_tokenizer_config(
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        **kwargs: Any,
+    ) -> ChatFormatterResponse:
+        # TODO: veryify this is correct
+        # Add a blank assistant message to the end of the messages to prompt the model to generate a response
+        if add_generation_prompt:
+            messages = [
+                *messages,
+                llama_types.ChatCompletionRequestAssistantMessage(
+                    role="assistant", content=""
+                ),
+            ]
+        prompt = env.render(
+            messages=messages,
+            bos_token=bos_token,
+            eos_token=eos_token,
+        )
+        return ChatFormatterResponse(
+            prompt=prompt, stop=[eos_token, bos_token], added_special=True
+        )
+
+    return format_tokenizer_config
+
+
+def hf_tokenizer_config_to_chat_completion_handler(
+    tokenizer_config: Dict[str, Any],
+    add_generation_prompt: bool = True,
+) -> LlamaChatCompletionHandler:
+    chat_formatter = hf_tokenizer_config_to_chat_formatter(
+        tokenizer_config, add_generation_prompt=add_generation_prompt
+    )
+    return chat_formatter_to_chat_completion_handler(chat_formatter)
+
+
+def guess_chat_format_from_gguf_metadata(metadata: Dict[str, str]) -> Optional[str]:
+    if "tokenizer.chat_template" not in metadata:
+        return None
+
+    if metadata["tokenizer.chat_template"] == CHATML_CHAT_TEMPLATE:
+        return "chatml"
+
+    if (
+        metadata["tokenizer.chat_template"] == MISTRAL_INSTRUCT_CHAT_TEMPLATE
+        or metadata["tokenizer.chat_template"] == MIXTRAL_INSTRUCT_CHAT_TEMPLATE
+    ):
+        return "mistral-instruct"
+
+    if metadata["tokenizer.chat_template"] == LLAMA3_INSTRUCT_CHAT_TEMPLATE:
+        return "llama-3"
+
+    return None
+
+
+### Utility functions for formatting chat prompts ###
+# TODO: Replace these with jinja2 templates
+
+
+def _get_system_message(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+) -> str:
+    """Get the first system message."""
+    for message in messages:
+        if message["role"] == "system":
+            return message["content"] or ""
+    return ""
+
+
+def _map_roles(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    role_map: Dict[str, str],
+) -> List[Tuple[str, Optional[str]]]:
+    """Map the message roles."""
+    output: List[Tuple[str, Optional[str]]] = []
+    for message in messages:
+        role = message["role"]
+        if role in role_map:
+            content: str | None = (
+                message["content"] if isinstance(message["content"], str) else None
+            )
+            output.append((role_map[role], content))
+    return output
+
+
+def _format_llama2(
+    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str, sep2: str
+) -> str:
+    """Format the prompt with the llama2 style."""
+    seps = [sep, sep2]
+    ret = system_message + sep
+    for i, (role, message) in enumerate(messages):
+        if system_message and i == 0:
+            m = message or ""
+            ret += m + seps[i % 2]
+        elif message:
+            ret += role + message + " " + seps[i % 2]
+        else:
+            ret += role + " "
+    return ret
+
+
+def _format_add_colon_single(
+    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
+) -> str:
+    """Format the prompt with the add-colon-single style."""
+    ret = system_message + sep
+    for role, message in messages:
+        if message:
+            ret += role + ": " + message + sep
+        else:
+            ret += role + ":"
+    return ret
+
+
+def _format_add_colon_two(
+    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str, sep2: str
+) -> str:
+    """Format the prompt with the add-colon-two style."""
+    seps = [sep, sep2]
+    ret = system_message + seps[0]
+    for i, (role, message) in enumerate(messages):
+        if message:
+            ret += role + ": " + message + seps[i % 2]
+        else:
+            ret += role + ":"
+    return ret
+
+
+def _format_no_colon_single(
+    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
+) -> str:
+    """Format the prompt with the no-colon-single style."""
+    ret = system_message
+    for role, message in messages:
+        if message:
+            ret += role + message + sep
+        else:
+            ret += role
+    return ret
+
+
+def _format_add_colon_space_single(
+    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
+) -> str:
+    """Format the prompt with the add-colon-space-single style."""
+    ret = system_message + sep
+    for role, message in messages:
+        if message:
+            ret += role + ": " + message + sep
+        else:
+            ret += role + ": "  # must be end with a space
+    return ret
+
+
+def _format_chatml(
+    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
+) -> str:
+    """Format the prompt with the chatml style."""
+    ret = "" if system_message == "" else system_message + sep + "\n"
+    for role, message in messages:
+        if message:
+            ret += role + "\n" + message + sep + "\n"
+        else:
+            ret += role + "\n"
+    return ret
+
+
+def _format_chatglm3(
+    system_message: str, messages: List[Tuple[str, Optional[str]]], sep: str
+) -> str:
+    """Format the prompt with the chatglm3 style."""
+    ret = ""
+    if system_message:
+        ret += system_message
+    for role, message in messages:
+        if message:
+            ret += role + "\n" + " " + message
+        else:
+            ret += role
+    return ret
+
+
+def _grammar_for_json(verbose: bool = False):
+    return llama_grammar.LlamaGrammar.from_string(
+        llama_grammar.JSON_GBNF, verbose=verbose
+    )
+
+
+def _grammar_for_json_schema(
+    schema: str, verbose: bool = False, fallback_to_json: bool = True
+):
+    try:
+        return llama_grammar.LlamaGrammar.from_json_schema(schema, verbose=verbose)
+    except Exception as e:
+        if fallback_to_json:
+            return _grammar_for_json(verbose=verbose)
+        else:
+            raise e
+
+
+def _grammar_for_response_format(
+    response_format: llama_types.ChatCompletionRequestResponseFormat,
+    verbose: bool = False,
+):
+    if response_format["type"] != "json_object":
+        return None
+
+    if "schema" in response_format:
+        return _grammar_for_json_schema(
+            json.dumps(response_format["schema"]), verbose=verbose
+        )
+    else:
+        return _grammar_for_json(verbose=verbose)
+
+
+### Chat Formats ###
+
+
+def register_chat_format(name: str):
+    def decorator(f: ChatFormatter):
+        chat_completion_handler = chat_formatter_to_chat_completion_handler(f)
+        LlamaChatCompletionHandlerRegistry().register_chat_completion_handler(
+            name, chat_completion_handler
+        )
+        return f
+
+    return decorator
+
+
+# see https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/tokenization_llama.py
+# system prompt is "embedded" in the first message
+@register_chat_format("llama-2")
+def format_llama2(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _system_template = "[INST] <<SYS>>\n{system_message}\n<</SYS>>"
+    _roles = dict(user="<s>[INST]", assistant="[/INST]")
+    _messages = _map_roles(messages, _roles)
+    system_message = _get_system_message(messages)
+    if system_message:
+        system_message = _system_template.format(system_message=system_message)
+    _prompt = _format_llama2(system_message, _messages, " ", "</s>") + "[/INST]"
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+# Chat format for Llama-3 models, see more details at:
+# https://github.com/meta-llama/llama3/blob/main/llama/tokenizer.py#L202-L229
+@register_chat_format("llama-3")
+def format_llama3(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _roles = dict(
+        system="<|start_header_id|>system<|end_header_id|>\n\n",
+        user="<|start_header_id|>user<|end_header_id|>\n\n",
+        assistant="<|start_header_id|>assistant<|end_header_id|>\n\n",
+    )
+    _sep = "<|eot_id|>"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_no_colon_single("", _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+
+
+# Chat format for Llama-4 models text only, see more details at:
+# https://github.com/meta-llama/llama-models/blob/main/models/llama4/chat_format.py#L61-L316
+@register_chat_format("llama-4")
+def format_llama4(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _roles = dict(
+        system="<|header_start|>system<|header_end|>\n\n",
+        user="<|header_start|>user<|header_end|>\n\n",
+        assistant="<|header_start|>assistant<|header_end|>\n\n",
+    )
+    _sep = "<|eot|>"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_no_colon_single("", _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+
+
+@register_chat_format("alpaca")
+def format_alpaca(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _roles = dict(user="### Instruction", assistant="### Response")
+    _sep = "\n\n"
+    _sep2 = "</s>"
+    system_message = _get_system_message(messages)
+    _messages = _map_roles(messages, _roles)
+    _prompt = _format_add_colon_two(system_message, _messages, _sep, _sep2)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("qwen")
+def format_qwen(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _roles = dict(user="<|im_start|>user", assistant="<|im_start|>assistant")
+    system_message = _get_system_message(messages) or "You are a helpful assistant."
+    system_template = "<|im_start|>system\n{system_message}"
+    system_message = system_template.format(system_message=system_message)
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _sep = "<|im_end|>"
+    _prompt = _format_chatml(system_message, _messages, _sep)
+    _sep2 = "<|endoftext|>"
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep2)
+
+
+@register_chat_format("vicuna")
+def format(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _system_message = "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions."
+    _roles = dict(user="USER", assistant="ASSISTANT")
+    _sep = " "
+    _sep2 = "</s>"
+    system_message = _system_message
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_add_colon_two(system_message, _messages, _sep, _sep2)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("oasst_llama")
+def format_oasst_llama(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _system_template = "[INST] <<SYS>>\n{system_message}\n<</SYS>>\n\n"
+    _roles = dict(user="<|prompter|>", assistant="<|assistant|>")
+    _sep = "</s>"
+    system_message = _get_system_message(messages)
+    system_message = _system_template.format(system_message=system_message)
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_no_colon_single(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("baichuan-2")
+def format_baichuan2(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _system_template = "{system_message}"
+    _roles = dict(user="<reserved_106>", assistant="<reserved_107>")
+    _sep = ""
+    system_message = _get_system_message(messages)
+    system_message = _system_template.format(system_message=system_message)
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_no_colon_single(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("baichuan")
+def format_baichuan(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _system_template = "{system_message}"
+    _roles = dict(user="<reserved_102>", assistant="<reserved_103>")
+    _sep = ""
+    system_message = _get_system_message(messages)
+    system_message = _system_template.format(system_message=system_message)
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_no_colon_single(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("openbuddy")
+def format_openbuddy(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _system_message = """You are a helpful, respectful and honest INTP-T AI Assistant named Buddy. You are talking to a human User.
+Always answer as helpfully and logically as possible, while being safe. Your answers should not include any harmful, political, religious, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
+If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information.
+You can speak fluently in many languages, for example: English, Chinese.
+You cannot access the internet, but you have vast knowledge, cutoff: 2021-09.
+You are trained by OpenBuddy team, (https://openbuddy.ai, https://github.com/OpenBuddy/OpenBuddy), you are based on LLaMA and Falcon transformers model, not related to GPT or OpenAI.
+
+"""
+    _roles = dict(user="User", assistant="Assistant")
+    _sep = "\n"
+    system_message = _system_message
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_add_colon_single(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("redpajama-incite")
+def format_redpajama_incite(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _system_message = _get_system_message(messages)
+    _roles = dict(user="<human>", assistant="<bot>")
+    _sep = "\n"
+    _stop = "<human>"
+    system_message = _system_message
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_add_colon_single(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_stop)
+
+
+@register_chat_format("snoozy")
+def format_snoozy(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    system_template = "### Instruction:\n{system_message}"
+    default_system_message = "The prompt below is a question to answer, a task to complete, or a conversation to respond to; decide which and write an appropriate response."
+    _system_message = _get_system_message(messages)
+    _system_message = (
+        _system_message if _system_message != "" else default_system_message
+    )
+    system_message = system_template.format(system_message=_system_message)
+    _roles = dict(user="### Prompt", assistant="### Response")
+    _sep = "\n"
+    _stop = "###"
+    system_message = _system_message
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_add_colon_single(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_stop)
+
+
+@register_chat_format("phind")
+def format_phind(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _roles = dict(user="### User Message", assistant="### Assistant")
+    _sep = "\n\n"
+    _system_message = "### System Prompt\nYou are an intelligent programming assistant."
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_add_colon_single(_system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("intel")
+def format_intel(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _roles = dict(user="### User:", assistant="### Assistant:")
+    _sep = "\n"
+    _system_message = "### System:\n{system_message}"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_add_colon_single(_system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("open-orca")
+def format_open_orca(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    system_template = "{system_message}"
+    system_message = (
+        "You are a helpful assistant. Please answer truthfully and write out your "
+        "thinking step by step to be sure you get the right answer. If you make a mistake or encounter "
+        "an error in your thinking, say so out loud and attempt to correct it. If you don't know or "
+        "aren't sure about something, say so clearly. You will act as a professional logician, mathematician, "
+        "and physicist. You will also act as the most appropriate type of expert to answer any particular "
+        "question or solve the relevant problem; state which expert type your are, if so. Also think of "
+        "any particular named expert that would be ideal to answer the relevant question or solve the "
+        "relevant problem; name and act as them, if appropriate."
+    )
+    roles = ("User", "Assistant")
+    sep = "<|end_of_turn|>\n"
+    # stop_token_ids=[32000, 32001],  # "<|end_of_turn|>"
+    stop_str = "User"
+    system_message = system_template.format(system_message=system_message)
+    _messages = _map_roles(messages, dict(zip(roles, roles)))
+    _messages.append((roles[1], None))
+    _prompt = _format_add_colon_space_single(system_message, _messages, sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=stop_str)
+
+
+@register_chat_format("mistrallite")
+def format_mistrallite(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _roles = dict(user="<|prompter|>", assistant="</s>\n<|assistant|>")
+    _sep = " "
+    system_template = """<|system|>{system_message}</s>"""
+    system_message = _get_system_message(messages)
+    system_message = system_template.format(system_message=system_message)
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_no_colon_single(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt)
+
+
+@register_chat_format("zephyr")
+def format_zephyr(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    system_template = """<|system|>
+{system_message}"""
+    system_message = _get_system_message(messages)
+    system_message = system_template.format(system_message=system_message)
+    _roles = dict(user="<|user|>\n", assistant="<|assistant|>\n")
+    _sep = "</s>"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_chatml(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+
+
+@register_chat_format("pygmalion")
+def format_pygmalion(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    system_template = """<|system|>{system_message}"""
+    system_message = _get_system_message(messages)
+    system_message = system_template.format(system_message=system_message)
+    _roles = dict(user="<|user|>", assistant="<|model|>")
+    _sep = "\n"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_chatml(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+
+
+@register_chat_format("chatml")
+def format_chatml(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    system_template = """<|im_start|>system
+{system_message}"""
+    system_message = _get_system_message(messages)
+    system_message = system_template.format(system_message=system_message)
+    _roles = dict(user="<|im_start|>user", assistant="<|im_start|>assistant")
+    _sep = "<|im_end|>"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_chatml(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+
+
+@register_chat_format("mistral-instruct")
+def format_mistral_instruct(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    eos = "</s>"
+    stop = eos
+    prompt = ""
+    for message in messages:
+        if (
+            message["role"] == "user"
+            and message["content"] is not None
+            and isinstance(message["content"], str)
+        ):
+            prompt += "[INST] " + message["content"]
+        elif message["role"] == "assistant" and message["content"] is not None:
+            prompt += " [/INST]" + message["content"] + eos
+    prompt += " [/INST]"
+    return ChatFormatterResponse(prompt=prompt, stop=stop)
+
+
+@register_chat_format("chatglm3")
+def format_chatglm3(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    system_template = """<|system|>
+{system_message}"""
+    system_message = _get_system_message(messages)
+    system_message = system_template.format(system_message=system_message)
+    _roles = dict(user="<|user|>", assistant="<|assistant|>")
+    _sep = "</s>"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_chatglm3(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+
+
+@register_chat_format("openchat")
+def format_openchat(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    system_template = "{system_message}<|end_of_turn|>"
+    system_message = _get_system_message(messages)
+    system_message = system_template.format(system_message=system_message)
+    _roles = dict(
+        user="GPT4 Correct User: ", assistant="<|end_of_turn|>GPT4 Correct Assistant: "
+    )
+    _sep = "<|end_of_turn|>"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_chatml(system_message, _messages, _sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+
+
+# Chat format for Saiga models, see more details and available models:
+# https://huggingface.co/collections/IlyaGusev/saiga2-saigamistral-6505d4ccc3d1e53166b636cd
+@register_chat_format("saiga")
+def format_saiga(
+    messages: list[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    _message_template = "<s>{role}\n{content}</s>"
+    _roles = dict(user="user", bot="bot", system="system")
+    _messages = _map_roles(messages, _roles)
+
+    _prompt = ""
+    for role, content in _messages:
+        if content:
+            _prompt += _message_template.format(role=role, content=content)
+        else:
+            _prompt += f"<s>{role}\n"
+    # Response template
+    _prompt += "<s>bot"
+    return ChatFormatterResponse(prompt=_prompt.strip())
+
+
+# Chat format for Google's Gemma models, see more details and available models:
+# https://huggingface.co/collections/google/gemma-release-65d5efbccdbb8c4202ec078b
+@register_chat_format("gemma")
+def format_gemma(
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    **kwargs: Any,
+) -> ChatFormatterResponse:
+    system_message = _get_system_message(messages)
+    if system_message != "":
+        logger.debug(
+            "`role='system'` messages are not allowed on Google's Gemma models."
+        )
+    _roles = dict(user="<start_of_turn>user\n", assistant="<start_of_turn>model\n")
+    _sep = "<end_of_turn>\n"
+    _messages = _map_roles(messages, _roles)
+    _messages.append((_roles["assistant"], None))
+    _prompt = _format_no_colon_single(system_message="", messages=_messages, sep=_sep)
+    return ChatFormatterResponse(prompt=_prompt, stop=_sep)
+
+
+# Tricky chat formats that require custom chat handlers
+
+
+@register_chat_completion_handler("functionary")
+def functionary_chat_handler(
+    llama: llama.Llama,
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    functions: Optional[List[llama_types.ChatCompletionFunction]] = None,
+    function_call: Optional[llama_types.ChatCompletionRequestFunctionCall] = None,
+    tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+    tool_choice: Optional[llama_types.ChatCompletionToolChoiceOption] = None,
+    temperature: float = 0.2,
+    top_p: float = 0.95,
+    top_k: int = 40,
+    min_p: float = 0.05,
+    typical_p: float = 1.0,
+    stream: bool = False,
+    stop: Optional[Union[str, List[str]]] = [],
+    response_format: Optional[llama_types.ChatCompletionRequestResponseFormat] = None,
+    max_tokens: Optional[int] = None,
+    present_penalty: float = 0.0,
+    frequency_penalty: float = 0.0,
+    repeat_penalty: float = 1.1,
+    top_n_sigma: float = -1.00,
+    mirostat_mode: int = 0,
+    mirostat_tau: float = 5.0,
+    mirostat_eta: float = 0.1,
+    xtc_threshold: float = 0.1,
+    xtc_probability: float = 0.0,
+    dry_multiplier: float = 0.0,
+    dry_base: float = 1.75,
+    dry_allowed_length: int = 2,
+    dry_penalty_last_n:int = 0,
+    dry_seq_breakers: list[str] = ["\n", ":", "\"", "*"],
+    adaptive_target : float = -1.0,
+    adaptive_decay : float = 0.9,
+    use_infill: bool = False,
+    model: Optional[str] = None,
+    logits_processor: Optional[llama.LogitsProcessorList] = None,
+    grammar: Optional[llama.LlamaGrammar] = None,
+    **kwargs,  # type: ignore
+) -> Union[llama_types.ChatCompletion, Iterator[llama_types.ChatCompletionChunk]]:
+    SYSTEM_MESSAGE = """A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions. The assistant calls functions with appropriate input when necessary"""
+
+    def generate_type_definition(
+        param: Dict[str, llama_types.JsonType], indent_level: int, shared_defs
+    ) -> str:
+        indent = "  " * indent_level
+        if "$ref" in param:
+            # Reference to a shared definition
+            ref_name = param["$ref"].split("/")[
+                -1
+            ]  # Extract the type name from the reference
+            return ref_name
+        elif param.get("type") == "array":
+            items = param.get("items", {})
+            item_type = generate_type_definition(items, indent_level + 1, shared_defs)
+            return f"Array<{item_type}>"
+        elif param.get("type") == "object":
+            properties = param.get("properties", {})
+            nested_schema = "{\n"
+            for nested_param_name, nested_param in properties.items():
+                nested_param_type = generate_type_definition(
+                    nested_param, indent_level + 1, shared_defs
+                )
+                nested_schema += (
+                    f"{indent}  {nested_param_name}: {nested_param_type},\n"
+                )
+            nested_schema += indent + "}"
+            return nested_schema
+        elif "enum" in param:
+            # Enum type
+            return " | ".join([f'"{enum_value}"' for enum_value in param["enum"]])
+        else:
+            # Simple type
+            return param.get("type", "any")
+
+    def generate_shared_definitions(shared_defs, indent_level: int) -> str:
+        indent = "  " * indent_level
+        shared_definitions = ""
+        for def_name, def_properties in shared_defs.items():
+            shared_definitions += f"{indent}type {def_name} = "
+            if def_properties.get("type") == "object":
+                shared_definitions += generate_type_definition(
+                    def_properties, indent_level, shared_defs
+                )
+            elif "enum" in def_properties:
+                # Enum type
+                shared_definitions += " | ".join(
+                    [f'"{enum_value}"' for enum_value in def_properties["enum"]]
+                )
+            shared_definitions += ";\n"
+        return shared_definitions
+
+    def generate_schema_from_functions(functions, namespace="functions") -> str:
+        schema = (
+            "// Supported function definitions that should be called when necessary.\n"
+        )
+        schema += f"namespace {namespace} {{\n\n"
+
+        # Generate shared definitions
+        shared_definitions = {}
+        for function in functions:
+            parameters = function.get("parameters", {})
+            shared_definitions.update(parameters.get("$defs", {}))
+
+        schema += generate_shared_definitions(shared_definitions, 1)
+
+        for function in functions:
+            function_name = function["name"]
+            description = function.get("description", "")
+            parameters = function.get("parameters", {})
+            required_params = parameters.get("required", [])
+
+            schema += f"  // {description}\n"
+            schema += f"  type {function_name} = (_: {{\n"
+
+            for param_name, param in parameters.get("properties", {}).items():
+                param_description = param.get("description", "")
+                param_type = generate_type_definition(param, 2, shared_definitions)
+                optional_indicator = "" if param_name in required_params else "?"
+                schema += f"    // {param_description}\n"
+                schema += f"    {param_name}{optional_indicator}: {param_type},\n"
+            schema += "  }) => any;\n\n"
+
+        schema += "}} // namespace {}\n".format(namespace)
+        return schema
+
+    def prepare_messages_for_inference(
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        functions: Optional[List[llama_types.ChatCompletionFunctions]] = None,
+        tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+    ):
+        all_messages: List[llama_types.ChatCompletionRequestMessage] = []
+        if functions is not None:
+            all_messages.append(
+                llama_types.ChatCompletionRequestSystemMessage(
+                    role="system", content=generate_schema_from_functions(functions)
+                )
+            )
+
+        if tools is not None:
+            all_messages.append(
+                llama_types.ChatCompletionRequestSystemMessage(
+                    role="system",
+                    content=generate_schema_from_functions(
+                        [
+                            tool["function"]
+                            for tool in tools
+                            if tool["type"] == "function"
+                        ]
+                    ),
+                )
+            )
+
+        all_messages.append(
+            llama_types.ChatCompletionRequestSystemMessage(
+                role="system", content=SYSTEM_MESSAGE
+            )
+        )
+
+        for message in messages:
+            # Function call responses
+            if message["role"] == "function" and "name" in message:
+                message["name"] = f"functions.{message['name']}"
+            # Function call requests by assistant
+            if "function_call" in message:
+                message["function_call"][
+                    "name"
+                ] = f"functions.{message['function_call']['name']}"
+            all_messages.append(message)
+
+        all_messages.append(
+            llama_types.ChatCompletionRequestAssistantMessage(
+                role="assistant", content=None
+            )
+        )
+
+        def message_to_str(msg: llama_types.ChatCompletionRequestMessage):
+            if msg["role"] == "system":
+                return f"system:\n{msg['content']}\n"
+
+            elif msg["role"] == "function" and "name" in msg:
+                return f"function name={msg['name']}:\n{msg['content']}\n"
+            elif msg["role"] == "function" and "function_call" in msg:
+                return f"function name={msg['function_call']['name']}:\n{msg['function_call']['arguments']}\n"
+            elif msg["role"] == "tool":
+                if msg["content"] is not None:
+                    return f"function name={msg['tool_call_id']}:\n{msg['content']}\n"
+                else:
+                    return f"function name={msg['tool_call_id']}\n"
+            elif msg["role"] == "user":
+                if msg["content"] is None:
+                    return "user:\n</s></s>\n"
+                else:
+                    return f"user:\n</s>{msg['content']}</s>\n"
+            elif msg["role"] == "assistant":
+                if msg["content"] is not None and "function_call" in msg:
+                    return f"assistant:\n{msg['content']}\nassistant to={msg['function_call']['name']}:\n{msg['function_call']['arguments']}</s>\n"
+                elif "function_call" in msg:
+                    return f"assistant to={msg['function_call']['name']}:\n{msg['function_call']['arguments']}</s>\n"
+                elif "tool_calls" in msg and len(msg["tool_calls"]) > 0:
+                    for tool_call in msg[
+                        "tool_calls"
+                    ]:  # NOTE: probably doesn't work with the functionary model
+                        return f"assistant to={tool_call['id']}:\n{tool_call['function']['arguments']}</s>\n"
+                elif msg["content"] is None:
+                    return "assistant"
+                else:
+                    return f"assistant:\n{msg['content']}\n"
+            else:
+                raise ValueError(f"Unsupported role: {msg['role']}")
+
+        return "".join([message_to_str(msg) for msg in all_messages])
+
+    if tools is not None:
+        functions = [tool["function"] for tool in tools if tool["type"] == "function"]
+
+    if tool_choice is not None:
+        function_call = (
+            tool_choice if isinstance(tool_choice, str) else tool_choice["function"]
+        )
+
+    prompt = prepare_messages_for_inference(messages, functions, tools)
+
+    if function_call is None and (functions is None or len(functions) == 0):
+        completion_or_completion_chunks = llama.create_completion(
+            prompt=prompt + ":\n",
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            typical_p=typical_p,
+            stream=stream,
+            stop=["user:", "</s>"],
+            max_tokens=max_tokens,
+            present_penalty=present_penalty,
+            frequency_penalty=frequency_penalty,
+            repeat_penalty=repeat_penalty,
+            top_n_sigma=top_n_sigma,
+            mirostat_mode=mirostat_mode,
+            mirostat_tau=mirostat_tau,
+            mirostat_eta=mirostat_eta,
+            xtc_threshold=xtc_threshold,
+            xtc_probability=xtc_probability,
+            dry_multiplier=dry_multiplier,
+            dry_base=dry_base,
+            dry_allowed_length=dry_allowed_length,
+            dry_penalty_last_n=dry_penalty_last_n,
+            dry_seq_breakers=dry_seq_breakers,
+            adaptive_target=adaptive_target,
+            adaptive_decay=adaptive_decay,
+            use_infill=use_infill,
+            model=model,
+            logits_processor=logits_processor,
+            grammar=grammar,
+        )
+        return _convert_completion_to_chat(completion_or_completion_chunks, stream=stream)  # type: ignore
+
+    if function_call is None or (
+        isinstance(function_call, str) and function_call == "auto"
+    ):
+        stop = "\n"
+        completion: llama_types.Completion = llama.create_completion(
+            prompt=prompt, stop=stop, stream=False
+        )  # type: ignore
+        completion_text = completion["choices"][0]["text"]
+        # strip " to=functions." and ending ":"
+        function_call = completion_text.split(".")[-1][:-1]
+        new_prompt = prompt + completion_text + stop
+    elif isinstance(function_call, str) and function_call != "none":
+        new_prompt = prompt + ":\n"
+    elif isinstance(function_call, dict):
+        new_prompt = prompt + f" to=functions.{function_call['name']}:\n"
+        function_call = function_call["name"]
+    else:
+        new_prompt = prompt + ":\n"
+
+    function_body = None
+    for function in functions or []:
+        if function["name"] == function_call:
+            function_body = function["parameters"]
+            break
+    for tool in tools or []:
+        if tool["type"] == "function" and tool["function"]["name"] == function_call:
+            function_body = tool["function"]["parameters"]
+            break
+
+    if function_body is not None:
+        try:
+            with suppress_stdout_stderr(disable=llama.verbose):
+                grammar_text = llama_grammar.json_schema_to_gbnf(
+                    json.dumps(function_body)
+                )
+                grammar = llama_grammar.LlamaGrammar.from_string(
+                    llama_grammar.json_schema_to_gbnf(json.dumps(function_body)),
+                    verbose=llama.verbose,
+                )
+                print(grammar_text)
+        except Exception as e:
+            if llama.verbose:
+                print(
+                    "Failed to parse function body as JSON schema, falling back to default grammar"
+                )
+                print(e)
+            with suppress_stdout_stderr(disable=llama.verbose):
+                grammar = llama_grammar.LlamaGrammar.from_string(
+                    llama_grammar.JSON_GBNF,
+                    verbose=llama.verbose,
+                )
+    else:
+        with suppress_stdout_stderr(disable=llama.verbose):
+            grammar = llama_grammar.LlamaGrammar.from_string(
+                llama_grammar.JSON_GBNF, verbose=llama.verbose
+            )
+
+    completion: llama_types.Completion = llama.create_completion(
+        prompt=new_prompt,
+        stop=["user:", "</s>"],
+        stream=False,
+        grammar=grammar,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        min_p=min_p,
+        typical_p=typical_p,
+        present_penalty=present_penalty,
+        frequency_penalty=frequency_penalty,
+        repeat_penalty=repeat_penalty,
+        top_n_sigma=top_n_sigma,
+        mirostat_mode=mirostat_mode,
+        mirostat_tau=mirostat_tau,
+        mirostat_eta=mirostat_eta,
+        xtc_threshold=xtc_threshold,
+        xtc_probability=xtc_probability,
+        dry_multiplier=dry_multiplier,
+        dry_base=dry_base,
+        dry_allowed_length=dry_allowed_length,
+        dry_penalty_last_n=dry_penalty_last_n,
+        dry_seq_breakers=dry_seq_breakers,
+        adaptive_target=adaptive_target,
+        adaptive_decay=adaptive_decay,
+        use_infill=use_infill,
+        model=model,
+        logits_processor=logits_processor,
+    )  # type: ignore
+
+    assert "usage" in completion
+    assert isinstance(function_call, str)
+    assert stream is False  # TODO: support stream mode
+
+    if llama.verbose:
+        print(new_prompt)
+        print(completion["choices"][0]["text"])
+
+    # TODO: support stream mode
+    return llama_types.CreateChatCompletionResponse(
+        id="chat" + completion["id"],
+        object="chat.completion",
+        created=completion["created"],
+        model=completion["model"],
+        choices=[
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "function_call": {
+                        "name": function_call,
+                        "arguments": completion["choices"][0]["text"],
+                    },
+                    "tool_calls": [
+                        {
+                            "id": function_call,
+                            "type": "function",
+                            "function": {
+                                "name": function_call,
+                                "arguments": completion["choices"][0]["text"],
+                            },
+                        }
+                    ],
+                },
+                "logprobs": _convert_text_completion_logprobs_to_chat(completion["choices"][0]["logprobs"]),
+                "finish_reason": "tool_calls",
+            }
+        ],
+        usage=completion["usage"],
+    )
+
+
+@register_chat_completion_handler("functionary-v1")
+@register_chat_completion_handler("functionary-v2")
+def functionary_v1_v2_chat_handler(
+    llama: llama.Llama,
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    functions: Optional[List[llama_types.ChatCompletionFunction]] = None,
+    function_call: Optional[llama_types.ChatCompletionRequestFunctionCall] = None,
+    tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+    tool_choice: Optional[llama_types.ChatCompletionToolChoiceOption] = None,
+    temperature: float = 0.2,
+    top_p: float = 0.95,
+    top_k: int = 40,
+    min_p: float = 0.05,
+    typical_p: float = 1.0,
+    stream: bool = False,
+    stop: Optional[Union[str, List[str]]] = [],
+    response_format: Optional[llama_types.ChatCompletionRequestResponseFormat] = None,
+    max_tokens: Optional[int] = None,
+    present_penalty: float = 0.0,
+    frequency_penalty: float = 0.0,
+    repeat_penalty: float = 1.1,
+    top_n_sigma: float = -1.00,
+    mirostat_mode: int = 0,
+    mirostat_tau: float = 5.0,
+    mirostat_eta: float = 0.1,
+    xtc_threshold: float = 0.1,
+    xtc_probability: float = 0.0,
+    dry_multiplier: float = 0.0,
+    dry_base: float = 1.75,
+    dry_allowed_length: int = 2,
+    dry_penalty_last_n:int = 0,
+    dry_seq_breakers: list[str] = ["\n", ":", "\"", "*"],
+    adaptive_target : float = -1.0,
+    adaptive_decay : float = 0.9,
+    use_infill: bool = False,
+    model: Optional[str] = None,
+    logits_processor: Optional[llama.LogitsProcessorList] = None,
+    grammar: Optional[llama.LlamaGrammar] = None,
+    **kwargs,  # type: ignore
+) -> Union[llama_types.ChatCompletion, Iterator[llama_types.ChatCompletionChunk]]:
+    SYSTEM_MESSAGE = """A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions. The assistant calls functions with appropriate input when necessary"""
+
+    tokenizer = llama.tokenizer_
+    assert hasattr(
+        tokenizer, "hf_tokenizer"
+    ), "Please provide a valid hf_tokenizer_path from https://huggingface.co/meetkai when initializing the Llama class"
+    from transformers import AutoTokenizer
+
+    if "<|START_OF_FUNCTION_CALL|>" in tokenizer.hf_tokenizer.additional_special_tokens:
+        version = "v1"
+        END_SYSTEM_TOKEN = "<|END_OF_SYSTEM|>"
+        END_USER_TOKEN = "<|END_OF_USER|>"
+        END_ASSISTANT_TOKEN = "<|END_OF_ASSISTANT|>"
+        END_FUNCTION_RESULT_TOKEN = "<|END_OF_FUNCTION_RESULT|>"
+        START_FUNCTION_CALL_TOKEN = "<|START_OF_FUNCTION_CALL|>"
+        END_FUNCTION_CALL_TOKEN = "<|END_OF_FUNCTION_CALL|>"
+    else:
+        version = "v2"
+        RECIPIENT_TOKEN = "<|recipient|>"
+        FROM_TOKEN = "<|from|>"
+        STOP_TOKEN = "<|stop|>"
+        CONTENT_TOKEN = "<|content|>"
+
+    def generate_type_definition(
+        param: Dict[str, llama_types.JsonType], indent_level: int, shared_defs
+    ) -> str:
+        indent = "  " * indent_level
+        if "$ref" in param:
+            # Reference to a shared definition
+            ref_name = param["$ref"].split("/")[
+                -1
+            ]  # Extract the type name from the reference
+            return ref_name
+        elif param.get("type") == "array":
+            items = param.get("items", {})
+            item_type = generate_type_definition(items, indent_level + 1, shared_defs)
+            return f"Array<{item_type}>"
+        elif param.get("type") == "object":
+            properties = param.get("properties", {})
+            nested_schema = "{\n"
+            for nested_param_name, nested_param in properties.items():
+                nested_param_type = generate_type_definition(
+                    nested_param, indent_level + 1, shared_defs
+                )
+                nested_schema += (
+                    f"{indent}  {nested_param_name}: {nested_param_type},\n"
+                )
+            nested_schema += indent + "}"
+            return nested_schema
+        elif "enum" in param:
+            # Enum type
+            return " | ".join([f'"{enum_value}"' for enum_value in param["enum"]])
+        else:
+            # Simple type
+            return param.get("type", "any")
+
+    def generate_shared_definitions(shared_defs, indent_level: int) -> str:
+        indent = "  " * indent_level
+        shared_definitions = ""
+        for def_name, def_properties in shared_defs.items():
+            shared_definitions += f"{indent}type {def_name} = "
+            if def_properties.get("type") == "object":
+                shared_definitions += generate_type_definition(
+                    def_properties, indent_level, shared_defs
+                )
+            elif "enum" in def_properties:
+                # Enum type
+                shared_definitions += " | ".join(
+                    [f'"{enum_value}"' for enum_value in def_properties["enum"]]
+                )
+            shared_definitions += ";\n"
+        return shared_definitions
+
+    def generate_schema_from_functions(functions, namespace="functions") -> str:
+        schema = (
+            "// Supported function definitions that should be called when necessary.\n"
+        )
+        schema += f"namespace {namespace} {{\n\n"
+
+        # Generate shared definitions
+        shared_definitions = {}
+        for function in functions:
+            parameters = function.get("parameters", {})
+            shared_definitions.update(parameters.get("$defs", {}))
+
+        schema += generate_shared_definitions(shared_definitions, 1)
+
+        for function in functions:
+            function_name = function["name"]
+            description = function.get("description", "")
+            parameters = function.get("parameters", {})
+            required_params = parameters.get("required", [])
+
+            schema += f"// {description}\n"
+            schema += f"type {function_name} = (_: {{\n"
+
+            for param_name, param in parameters.get("properties", {}).items():
+                param_description = param.get("description", "")
+                param_type = generate_type_definition(param, 2, shared_definitions)
+                optional_indicator = "" if param_name in required_params else "?"
+                schema += f"// {param_description}\n"
+                schema += f"{param_name}{optional_indicator}: {param_type},\n"
+            schema += "}) => any;\n\n"
+
+        schema += "}} // namespace {}".format(namespace)
+        return schema
+
+    def prepare_messages_for_inference(
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        tokenizer: AutoTokenizer,
+        version: Literal["v1", "v2"],
+        functions: Optional[List[llama_types.ChatCompletionFunctions]] = None,
+        tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+        tool_choice: Union[Dict, str] = "auto",
+    ):
+        all_messages: List[llama_types.ChatCompletionRequestMessage] = []
+        if tool_choice == "none":
+            all_messages.append(
+                llama_types.ChatCompletionRequestSystemMessage(
+                    role="system", content=generate_schema_from_functions([])
+                )
+            )
+        else:
+            if functions is not None:
+                all_messages.append(
+                    llama_types.ChatCompletionRequestSystemMessage(
+                        role="system", content=generate_schema_from_functions(functions)
+                    )
+                )
+            elif tools is not None and tool_choice != "none":
+                all_messages.append(
+                    llama_types.ChatCompletionRequestSystemMessage(
+                        role="system",
+                        content=generate_schema_from_functions(
+                            [
+                                tool["function"]
+                                for tool in tools
+                                if tool["type"] == "function"
+                            ]
+                        ),
+                    )
+                )
+
+        all_messages.append(
+            llama_types.ChatCompletionRequestSystemMessage(
+                role="system", content=SYSTEM_MESSAGE
+            )
+        )
+
+        for message in messages:
+            # Function call responses
+            if message["role"] == "function" and "name" in message:
+                message["name"] = f"functions.{message['name']}"
+            # Function call requests by assistant
+            if "function_call" in message:
+                message["function_call"][
+                    "name"
+                ] = f"functions.{message['function_call']['name']}"
+            all_messages.append(message)
+
+        if version == "v1":
+            suffix = "assistant:\n"
+        else:
+            suffix = "<|from|>assistant\n<|recipient|>"
+
+        return (
+            tokenizer.hf_tokenizer.apply_chat_template(all_messages, tokenize=False)
+            + suffix
+        )
+
+    if tools is not None:
+        functions = [tool["function"] for tool in tools if tool["type"] == "function"]
+
+    if tool_choice is not None:
+        function_call = (
+            tool_choice if isinstance(tool_choice, str) else tool_choice["function"]
+        )
+    elif function_call is not None:
+        pass
+    else:
+        function_call = "auto"
+
+    prompt = prepare_messages_for_inference(
+        messages, tokenizer, version, functions, tools, function_call
+    )
+
+    # If no tools/functions are provided
+    if function_call == "none" or functions is None or len(functions) == 0:
+        if version == "v1":
+            stop = END_ASSISTANT_TOKEN
+        else:
+            stop = STOP_TOKEN
+            prompt += "all\n<|content|>"
+
+        completion_or_completion_chunks = llama.create_completion(
+            prompt=prompt,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            typical_p=typical_p,
+            stream=stream,
+            stop=stop,
+            max_tokens=max_tokens,
+            present_penalty=present_penalty,
+            frequency_penalty=frequency_penalty,
+            repeat_penalty=repeat_penalty,
+            top_n_sigma=top_n_sigma,
+            mirostat_mode=mirostat_mode,
+            mirostat_tau=mirostat_tau,
+            mirostat_eta=mirostat_eta,
+            xtc_threshold=xtc_threshold,
+            xtc_probability=xtc_probability,
+            dry_multiplier=dry_multiplier,
+            dry_base=dry_base,
+            dry_allowed_length=dry_allowed_length,
+            dry_penalty_last_n=dry_penalty_last_n,
+            dry_seq_breakers=dry_seq_breakers,
+            adaptive_target=adaptive_target,
+            adaptive_decay=adaptive_decay,
+            use_infill=use_infill,
+            model=model,
+            logits_processor=logits_processor,
+            grammar=grammar,
+        )
+        if stream is False:
+            completion_or_completion_chunks["choices"][0]["text"] = (
+                completion_or_completion_chunks["choices"][0]["text"].lstrip()
+            )
+        return _convert_completion_to_chat(completion_or_completion_chunks, stream=stream)  # type: ignore
+
+    def get_grammar(function_call):
+        function_body = None
+        for function in functions or []:
+            if function["name"] == function_call:
+                function_body = function["parameters"]
+                break
+        for tool in tools or []:
+            if tool["type"] == "function" and tool["function"]["name"] == function_call:
+                function_body = tool["function"]["parameters"]
+                break
+
+        try:
+            with suppress_stdout_stderr(disable=llama.verbose):
+                grammar_text = llama_grammar.json_schema_to_gbnf(
+                    json.dumps(function_body)
+                )
+                grammar = llama_grammar.LlamaGrammar.from_string(
+                    llama_grammar.json_schema_to_gbnf(json.dumps(function_body))
+                )
+                print(grammar_text)
+        except Exception as e:
+            if llama.verbose:
+                print(
+                    "Failed to parse function body as JSON schema, falling back to default grammar"
+                )
+                print(e)
+            with suppress_stdout_stderr(disable=llama.verbose):
+                grammar = llama_grammar.LlamaGrammar.from_string(
+                    llama_grammar.JSON_GBNF, verbose=llama.verbose
+                )
+
+        return grammar
+
+    def create_completion(prompt, stop, grammar):
+        completion = cast(
+            llama_types.Completion,
+            llama.create_completion(
+                prompt=prompt,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                typical_p=typical_p,
+                stream=stream,
+                stop=stop,
+                max_tokens=max_tokens,
+                present_penalty=present_penalty,
+                frequency_penalty=frequency_penalty,
+                repeat_penalty=repeat_penalty,
+                top_n_sigma=top_n_sigma,
+                mirostat_mode=mirostat_mode,
+                mirostat_tau=mirostat_tau,
+                mirostat_eta=mirostat_eta,
+                xtc_threshold=xtc_threshold,
+                xtc_probability=xtc_probability,
+                dry_multiplier=dry_multiplier,
+                dry_base=dry_base,
+                dry_allowed_length=dry_allowed_length,
+                dry_penalty_last_n=dry_penalty_last_n,
+                dry_seq_breakers=dry_seq_breakers,
+                adaptive_target=adaptive_target,
+                adaptive_decay=adaptive_decay,
+                use_infill=use_infill,
+                model=model,
+                logits_processor=logits_processor,
+                grammar=grammar,
+            ),
+        )
+
+        return completion
+
+    content = ""
+    function_calls, function_bodies = [], []
+    completion_tokens = 0
+
+    def generate_streaming(tools, functions, function_call, prompt):
+        assert version == "v2", "Streaming for v1 is not supported"
+
+        chunk_id, chunk_created = None, None
+
+        # If tool_choice/function_call is provided
+        if isinstance(function_call, dict):
+            prompt += f"{function_call['name']}\n{CONTENT_TOKEN}"
+            grammar = get_grammar(function_call["name"])
+            stops = [STOP_TOKEN, FROM_TOKEN]
+            tool_id = "".join(
+                [random.choice(string.ascii_letters + string.digits) for _ in range(24)]
+            )
+            completion = create_completion(prompt=prompt, stop=stops, grammar=grammar)
+            completion_text = ""
+            first = True
+            for chunk in completion:
+                # Yield the tool/function name first
+                if first:
+                    if tools is not None:
+                        func_call_dict = {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_" + tool_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": function_call["name"],
+                                        "arguments": "",
+                                    },
+                                }
+                            ]
+                        }
+                    else:
+                        func_call_dict = {
+                            "function_call": {
+                                "name": function_call["name"],
+                                "arguments": "",
+                            }
+                        }
+                    yield llama_types.CreateChatCompletionStreamResponse(
+                        id="chat" + chunk["id"],
+                        object="chat.completion.chunk",
+                        created=chunk["created"],
+                        model=chunk["model"],
+                        choices=[
+                            {
+                                "index": 0,
+                                "logprobs": None,
+                                "delta": {
+                                    "role": None,
+                                    "content": None,
+                                    **func_call_dict,
+                                },
+                            }
+                        ],
+                    )
+                    first = False
+                if tools is not None:
+                    func_call_dict = {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_" + tool_id,
+                                "type": "function",
+                                "function": {
+                                    "name": None,
+                                    "arguments": chunk["choices"][0]["text"].rstrip(),
+                                },
+                            }
+                        ]
+                    }
+                else:
+                    func_call_dict = {
+                        "function_call": {
+                            "name": None,
+                            "arguments": chunk["choices"][0]["text"].rstrip(),
+                        }
+                    }
+                if len(chunk["choices"][0]["text"].rstrip()) > 0:
+                    yield llama_types.CreateChatCompletionStreamResponse(
+                        id="chat" + chunk["id"],
+                        object="chat.completion.chunk",
+                        created=chunk["created"],
+                        model=chunk["model"],
+                        choices=[
+                            {
+                                "index": 0,
+                                "logprobs": _convert_text_completion_logprobs_to_chat(chunk["choices"][0]["logprobs"]),
+                                "delta": {
+                                    "role": None,
+                                    "content": None,
+                                    **func_call_dict,
+                                },
+                            }
+                        ],
+                    )
+            # Yield tool_call/function_call stop message
+            yield llama_types.CreateChatCompletionStreamResponse(
+                id="chat" + chunk["id"],
+                object="chat.completion.chunk",
+                created=chunk["created"],
+                model=chunk["model"],
+                choices=[
+                    {
+                        "index": 0,
+                        "finish_reason": (
+                            "tool_calls" if tools is not None else "function_call"
+                        ),
+                        "logprobs": None,
+                        "delta": {
+                            "role": None,
+                            "content": None,
+                            "function_call": None,
+                            "tool_calls": None,
+                        },
+                    }
+                ],
+            )
+        # If "auto" or no tool_choice/function_call
+        elif isinstance(function_call, str) and function_call == "auto":
+            tool_index = 0
+            while True:
+                # Generate function name first
+                grammar = None
+                stops = CONTENT_TOKEN
+                completion = create_completion(
+                    prompt=prompt, stop=stops, grammar=grammar
+                )
+                completion_text = ""
+                for chunk in completion:
+                    completion_text += chunk["choices"][0]["text"]
+                if chunk_id is None:
+                    chunk_id = chunk["id"]
+                if chunk_created is None:
+                    chunk_created = chunk["created"]
+                function_name = completion_text.strip()
+                if function_name == "all":
+                    prompt += "all\n<|content|>"
+                    # Yield the first empty message for content
+                    yield llama_types.CreateChatCompletionStreamResponse(
+                        id="chat" + chunk_id,
+                        model=chunk["model"],
+                        created=chunk_created,
+                        object="chat.completion.chunk",
+                        choices=[
+                            {
+                                "index": 0,
+                                "delta": {"role": "assistant", "content": ""},
+                                "logprobs": None,
+                                "finish_reason": None,
+                            }
+                        ],
+                    )
+                else:
+                    prompt += f"{function_name}\n<|content|>"
+                    grammar = get_grammar(function_name)
+                    tool_id = "".join(
+                        [
+                            random.choice(string.ascii_letters + string.digits)
+                            for _ in range(24)
+                        ]
+                    )
+                    if tools is not None:
+                        func_call_dict = {
+                            "tool_calls": [
+                                {
+                                    "index": tool_index,
+                                    "id": "call_" + tool_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": function_name,
+                                        "arguments": "",
+                                    },
+                                }
+                            ]
+                        }
+                    else:
+                        func_call_dict = {
+                            "function_call": {"name": function_name, "arguments": ""}
+                        }
+                    # Stream function name
+                    yield llama_types.CreateChatCompletionStreamResponse(
+                        id="chat" + chunk_id,
+                        object="chat.completion.chunk",
+                        created=chunk_created,
+                        model=chunk["model"],
+                        choices=[
+                            {
+                                "index": 0,
+                                "logprobs": _convert_text_completion_logprobs_to_chat(chunk["choices"][0]["logprobs"]),
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": None,
+                                    **func_call_dict,
+                                },
+                            }
+                        ],
+                    )
+                # Generate content
+                stops = [RECIPIENT_TOKEN, STOP_TOKEN]
+                completion = create_completion(
+                    prompt=prompt, stop=stops, grammar=grammar
+                )
+                if function_name == "all":
+                    completion_text = ""
+                    stop_sequence, buffer, is_end = (
+                        "\n<|from|>assistant\n<|recipient|>",
+                        [],
+                        False,
+                    )
+                    for i, chunk in enumerate(completion):
+                        completion_text += chunk["choices"][0]["text"]
+                        if is_end:
+                            buffer.append(chunk["choices"][0]["text"].strip(" "))
+                            if stop_sequence.startswith("".join(buffer)):
+                                continue
+                            else:
+                                buffer.pop()
+                                while len(buffer) > 0:
+                                    yield llama_types.CreateChatCompletionStreamResponse(
+                                        id="chat" + chunk_id,
+                                        object="chat.completion.chunk",
+                                        created=chunk_created,
+                                        model=chunk["model"],
+                                        choices=[
+                                            {
+                                                "index": 0,
+                                                "logprobs": _convert_text_completion_logprobs_to_chat(chunk["choices"][0]["logprobs"]),
+                                                "delta": {
+                                                    "role": "assistant",
+                                                    "content": buffer.pop(0),
+                                                },
+                                            }
+                                        ],
+                                    )
+                                is_end = False
+                        elif chunk["choices"][0]["text"] == "\n":
+                            is_end = True
+                            buffer.append(chunk["choices"][0]["text"].strip(" "))
+                            continue
+
+                        if len(buffer) == 0 and len(chunk["choices"][0]["text"]) > 0:
+                            yield llama_types.CreateChatCompletionStreamResponse(
+                                id="chat" + chunk_id,
+                                object="chat.completion.chunk",
+                                created=chunk_created,
+                                model=chunk["model"],
+                                choices=[
+                                    {
+                                        "index": 0,
+                                        "logprobs": _convert_text_completion_logprobs_to_chat(chunk["choices"][0]["logprobs"]),
+                                        "delta": {
+                                            "role": "assistant",
+                                            "content": (
+                                                chunk["choices"][0]["text"]
+                                                if i > 0
+                                                else chunk["choices"][0][
+                                                    "text"
+                                                ].lstrip()
+                                            ),
+                                        },
+                                    }
+                                ],
+                            )
+                    # Check whether the model wants to generate another turn
+                    if (
+                        "<|from|> assistant" in completion_text
+                        or "<|from|>assistant" in completion_text
+                    ):
+                        if completion_text.endswith("\n<|from|>assistant\n"):
+                            cleaned_completion_text = completion_text[
+                                : -len("\n<|from|>assistant\n")
+                            ].strip()
+                        elif completion_text.endswith("\n<|from|> assistant\n"):
+                            cleaned_completion_text = completion_text[
+                                : -len("\n<|from|> assistant\n")
+                            ].strip()
+                        else:
+                            cleaned_completion_text = completion_text.strip()
+                        prompt += f"{cleaned_completion_text}\n<|from|>assistant\n<|recipient|>"
+                    else:
+                        # Yield stop message
+                        yield llama_types.CreateChatCompletionStreamResponse(
+                            id="chat" + chunk_id,
+                            model=chunk["model"],
+                            created=chunk_created,
+                            object="chat.completion.chunk",
+                            choices=[
+                                {
+                                    "index": 0,
+                                    "delta": {},
+                                    "logprobs": None,
+                                    "finish_reason": "stop",
+                                }
+                            ],
+                        )
+                        break
+                else:
+                    # Check whether the model wants to generate another turn
+                    completion_text = ""
+                    for chunk in completion:
+                        completion_text += chunk["choices"][0]["text"]
+                        if len(chunk["choices"][0]["text"].rstrip()) > 0:
+                            if tools is not None:
+                                func_call_dict = {
+                                    "tool_calls": [
+                                        {
+                                            "index": tool_index,
+                                            "id": "call_" + tool_id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": None,
+                                                "arguments": chunk["choices"][0][
+                                                    "text"
+                                                ].rstrip(),
+                                            },
+                                        }
+                                    ]
+                                }
+                            else:
+                                func_call_dict = {
+                                    "function_call": {
+                                        "name": None,
+                                        "arguments": chunk["choices"][0][
+                                            "text"
+                                        ].rstrip(),
+                                    }
+                                }
+                            yield llama_types.CreateChatCompletionStreamResponse(
+                                id="chat" + chunk_id,
+                                object="chat.completion.chunk",
+                                created=chunk_created,
+                                model=chunk["model"],
+                                choices=[
+                                    {
+                                        "index": 0,
+                                        "logprobs": _convert_text_completion_logprobs_to_chat(chunk["choices"][0]["logprobs"]),
+                                        "delta": {
+                                            "role": None,
+                                            "content": None,
+                                            **func_call_dict,
+                                        },
+                                    }
+                                ],
+                            )
+                    prompt += completion_text.strip()
+                    grammar = None
+                    completion = create_completion(
+                        prompt=prompt, stop=stops, grammar=grammar
+                    )
+                    completion_text += "".join(
+                        [chunk["choices"][0]["text"] for chunk in completion]
+                    )
+                    if (
+                        "<|from|> assistant" in completion_text
+                        or "<|from|>assistant" in completion_text
+                    ) and tools is not None:
+                        prompt += "\n<|from|>assistant\n<|recipient|>"
+                        tool_index += 1
+                    else:
+                        # Yield tool_call/function_call stop message
+                        yield llama_types.CreateChatCompletionStreamResponse(
+                            id="chat" + chunk_id,
+                            object="chat.completion.chunk",
+                            created=chunk_created,
+                            model=chunk["model"],
+                            choices=[
+                                {
+                                    "index": 0,
+                                    "finish_reason": (
+                                        "tool_calls"
+                                        if tools is not None
+                                        else "function_call"
+                                    ),
+                                    "logprobs": None,
+                                    "delta": {
+                                        "role": None,
+                                        "content": None,
+                                        "function_call": None,
+                                        "tool_calls": None,
+                                    },
+                                }
+                            ],
+                        )
+                        break
+
+    if stream is not False:
+        return generate_streaming(
+            tools=tools, functions=functions, function_call=function_call, prompt=prompt
+        )
+    else:
+        if version == "v1":
+            # If no or "auto" tool_choice/function_call
+            if isinstance(function_call, str) and function_call == "auto":
+                stops = ["\n", END_ASSISTANT_TOKEN]
+            # If tool_choice/function_call is provided
+            elif isinstance(function_call, dict):
+                prompt += f"{START_FUNCTION_CALL_TOKEN}{function_call['name']}:\n"
+                stops = END_FUNCTION_CALL_TOKEN
+                function_call = function_call["name"]
+                function_calls.append(function_call)
+                grammar = get_grammar(function_call)
+            else:
+                prompt = prompt
+                stops = ["\n", END_ASSISTANT_TOKEN]
+
+            completion = create_completion(prompt=prompt, stop=stops, grammar=grammar)
+            completion_text = completion["choices"][0]["text"]
+            completion_tokens += completion["usage"]["completion_tokens"]
+
+            # If the generation does not involve a function call
+            if (
+                START_FUNCTION_CALL_TOKEN not in prompt
+                and START_FUNCTION_CALL_TOKEN not in completion_text
+            ):
+                completion["usage"]["completion_tokens"] = completion_tokens
+                return _convert_completion_to_chat(completion, stream=stream)  # type: ignore
+            # If the generation involves a function call in completion, generate the parameters
+            elif (
+                START_FUNCTION_CALL_TOKEN not in prompt
+                and START_FUNCTION_CALL_TOKEN in completion_text
+            ):
+                prompt += (
+                    completion_text.replace(
+                        f"{START_FUNCTION_CALL_TOKEN} ", START_FUNCTION_CALL_TOKEN
+                    )
+                    + "\n"
+                )
+                function_calls.append(
+                    completion_text.split(START_FUNCTION_CALL_TOKEN)[-1][:-1].strip()
+                )
+                grammar = get_grammar(function_calls[-1])
+                completion = create_completion(
+                    prompt=prompt, stop=END_FUNCTION_CALL_TOKEN, grammar=grammar
+                )
+                completion_tokens += completion["usage"]["completion_tokens"]
+                function_bodies.append(completion["choices"][0]["text"].strip())
+            # If the prompt involves a function call, just append generated parameters to function_bodies
+            else:
+                function_bodies.append(completion_text.strip())
+        else:
+            # If tool_choice/function_call is provided
+            if isinstance(function_call, dict):
+                prompt += f"{function_call['name']}\n{CONTENT_TOKEN}"
+                function_call = function_call["name"]
+                function_calls.append(function_call)
+                grammar = get_grammar(function_call)
+                stops = [STOP_TOKEN, FROM_TOKEN]
+                completion = create_completion(
+                    prompt=prompt, stop=stops, grammar=grammar
+                )
+                completion_text = completion["choices"][0]["text"]
+                completion_tokens += completion["usage"]["completion_tokens"]
+                function_bodies.append(completion_text.strip())
+            # If "auto" or no tool_choice/function_call
+            elif isinstance(function_call, str) and function_call == "auto":
+                while True:
+                    # Generate function name first
+                    grammar = None
+                    stops = CONTENT_TOKEN
+                    completion = create_completion(
+                        prompt=prompt, stop=stops, grammar=grammar
+                    )
+                    completion_text = completion["choices"][0]["text"]
+                    completion_tokens += completion["usage"]["completion_tokens"]
+                    function_name = completion_text.strip()
+                    if function_name == "all":
+                        prompt += "all\n<|content|>"
+                    else:
+                        function_call = completion_text.strip()
+                        prompt += f"{function_call}\n<|content|>"
+                        function_calls.append(function_call)
+                        grammar = get_grammar(function_call)
+                    # Generate content
+                    stops = [RECIPIENT_TOKEN, STOP_TOKEN]
+                    completion = create_completion(
+                        prompt=prompt, stop=stops, grammar=grammar
+                    )
+                    completion_text = completion["choices"][0]["text"]
+                    completion_tokens += completion["usage"]["completion_tokens"]
+                    if function_name == "all":
+                        if completion_text.endswith("\n<|from|>assistant\n"):
+                            content += completion_text[: -len("\n<|from|>assistant\n")]
+                        if completion_text.endswith("\n<|from|> assistant\n"):
+                            content += completion_text[-len("\n<|from|> assistant\n")]
+                        else:
+                            content += completion_text
+                        content = content.lstrip()
+                        # Check whether the model wants to generate another turn
+                        if (
+                            "<|from|> assistant" in completion_text
+                            or "<|from|>assistant" in completion_text
+                        ):
+                            if completion_text.endswith("\n<|from|>assistant\n"):
+                                cleaned_completion_text = completion_text[
+                                    : -len("\n<|from|>assistant\n")
+                                ].strip()
+                            elif completion_text.endswith("\n<|from|> assistant\n"):
+                                cleaned_completion_text = completion_text[
+                                    -len("\n<|from|> assistant\n")
+                                ].strip()
+                            else:
+                                cleaned_completion_text = completion_text.strip()
+                            prompt += f"{cleaned_completion_text}\n<|from|>assistant\n<|recipient|>"
+                        else:
+                            break
+                    else:
+                        function_bodies.append(completion_text.strip())
+                        # Check whether the model wants to generate another turn
+                        prompt += completion_text.strip()
+                        grammar = None
+                        completion = create_completion(
+                            prompt=prompt, stop=stops, grammar=grammar
+                        )
+                        completion_tokens += completion["usage"]["completion_tokens"]
+                        if (
+                            "<|from|> assistant" in completion["choices"][0]["text"]
+                            or "<|from|>assistant" in completion["choices"][0]["text"]
+                        ):
+                            prompt += "\n<|from|>assistant\n<|recipient|>"
+                        else:
+                            break
+
+        assert "usage" in completion
+        assert len(function_calls) == len(function_bodies)
+
+        tool_calls: List[llama_types.ChatCompletionMessageToolCall] = []
+        for function_call, function_body in zip(function_calls, function_bodies):
+            tool_calls.append(
+                {
+                    "id": "call_"
+                    + "".join(
+                        [
+                            random.choice(string.ascii_letters + string.digits)
+                            for _ in range(24)
+                        ]
+                    ),
+                    "type": "function",
+                    "function": {
+                        "name": function_call,
+                        "arguments": function_body,
+                    },
+                }
+            )
+
+        # TODO: support stream mode
+        function_call_dict: Union[
+            Dict[str, str],
+            Dict[
+                Literal["function_call"],
+                llama_types.ChatCompletionRequestAssistantMessageFunctionCall,
+            ],
+        ] = {}
+        if len(tool_calls) > 0:
+            if tools is not None:
+                function_call_dict["tool_calls"] = tool_calls
+            else:
+                function_call_dict["function_call"] = {
+                    "name": tool_calls[0]["function"]["name"],
+                    "arguments": tool_calls[0]["function"]["arguments"],
+                }
+        completion["usage"]["completion_tokens"] = completion_tokens
+        return llama_types.CreateChatCompletionResponse(
+            id="chat" + completion["id"],
+            object="chat.completion",
+            created=completion["created"],
+            model=completion["model"],
+            choices=[
+                {
+                    "index": 0,
+                    "logprobs": _convert_text_completion_logprobs_to_chat(completion["choices"][0]["logprobs"]),
+                    "message": {
+                        "role": "assistant",
+                        "content": None if content == "" else content,
+                        **function_call_dict,
+                    },
+                    "finish_reason": "tool_calls" if len(tool_calls) > 0 else "stop",
+                }
+            ],
+            usage=completion["usage"],
+        )
+
+
+class MTMDChatHandler:
+    DEFAULT_SYSTEM_MESSAGE: Optional[str] = (
+"""You are an exceptionally capable, precise, and helpful multimodal AI assistant that excels at deeply understanding and richly describing images, charts, diagrams, text in images, scenes, and any visual content,
+while also answering every question accurately, clearly, and step-by-step when appropriate — always responding in the same language as the user's question, remaining polite, professional, and maximally helpful."""
+    )
+
+    CHAT_FORMAT = (
+        "{% for message in messages %}"
+            "{% if message.role == 'system' %}"
+                "{{ message.content }}"
+            "{% endif %}"
+
+            "{% if message.role == 'user' %}"
+                "{% if message.content is string %}"
+                    "\nUSER: {{ message.content }}"
+                "{% elif message.content is iterable %}"
+                    "\nUSER: "
+                    "{% for content in message.content %}"
+                        "{% if content.type == 'image_url' %}"
+                            "{{ content.image_url if content.image_url is string else content.image_url.url }}"
+                        "{% endif %}"
+                    "{% endfor %}"
+                    "{% for content in message.content %}"
+                        "{% if content.type == 'text' %}"
+                            "{{ content.text }}"
+                        "{% endif %}"
+                    "{% endfor %}"
+                "{% endif %}"
+            "{% endif %}"
+
+            "{% if message.role == 'assistant' and message.content is not none %}"
+                "\nASSISTANT: {{ message.content }}"
+            "{% endif %}"
+        "{% endfor %}"
+
+        "{% if add_generation_prompt %}"
+            "\nASSISTANT: "
+        "{% endif %}"
+    )
+
+    def __init__(
+            self,
+            clip_model_path: str,
+            verbose: bool = True,
+            use_gpu: bool = True,
+            image_min_tokens: int = -1,
+            image_max_tokens: int = -1,
+            **kwargs
+    ):
+
+        self.log_prefix = self.__class__.__name__
+        if kwargs:
+            unexpected_args = ", ".join(f"'{k}'" for k in kwargs.keys())
+            raise TypeError(
+                f"Initialization Error in {self.log_prefix}: Received unexpected keyword argument(s) {unexpected_args}.\n"
+                f"If you are passing model-specific parameters, ensure they are supported by {self.log_prefix}."
+            )
+
+        self.clip_model_path = clip_model_path
+        self.image_min_tokens = image_min_tokens
+        self.image_max_tokens = image_max_tokens
+        self.use_gpu = use_gpu
+        self.verbose = verbose
+
+        import llama_cpp.mtmd_cpp as mtmd_cpp
+        self._mtmd_cpp = mtmd_cpp
+        self.mtmd_ctx: Optional[mtmd_cpp.mtmd_context_p] = None
+        self.extra_template_arguments: dict[str, Any] = {}
+
+        if not os.path.exists(clip_model_path):
+            raise ValueError(f"{self.log_prefix}(__init__): Clip model path does not exist: {clip_model_path}")
+
+        # Pre-compile Jinja template
+        self.chat_template = ImmutableSandboxedEnvironment(
+            trim_blocks=True,
+            lstrip_blocks=True,
+        ).from_string(self.CHAT_FORMAT)
+
+        self._exit_stack = ExitStack()
+
+    def _init_mtmd_context(self, llama_model: llama.Llama):
+        """Initialize mtmd context with the llama model."""
+        if self.mtmd_ctx is not None:
+            return  # Already initialized
+
+        self._mtmd_cpp.mtmd_helper_log_set(llama_log_callback, ctypes.c_void_p(0))
+
+        # Get default parameters
+        self.mctx_params = self._mtmd_cpp.mtmd_context_params_default()
+        self.mctx_params.use_gpu = self.use_gpu
+        self.mctx_params.print_timings = self.verbose
+        self.mctx_params.n_threads = llama_model.n_threads
+        self.mctx_params.flash_attn_type  = self._mtmd_cpp.clip_flash_attn_type.CLIP_FLASH_ATTN_TYPE_AUTO
+        self.mctx_params.warmup = True
+        if self.image_min_tokens > 0:
+            self.mctx_params.image_min_tokens = self.image_min_tokens
+        if self.image_max_tokens > 0:
+            self.mctx_params.image_max_tokens = self.image_max_tokens
+        if (self.image_max_tokens < self.image_min_tokens) and self.image_max_tokens > 0:
+            raise ValueError(f"{self.log_prefix}(_init_mtmd_context): Configuration Error! image_max_tokens ({self.image_max_tokens}) "
+                                f"cannot be less than image_min_tokens ({self.image_min_tokens}).")
+
+        # Cache the model's eos token and bos token
+        self.mtmd_eos_token=llama_model.detokenize([llama_model.token_eos()]).decode('utf-8', errors='ignore')
+        self.mtmd_bos_token=llama_model.detokenize([llama_model.token_bos()]).decode('utf-8', errors='ignore')
+
+        # Cache the mtmd_default_marker
+        self.media_marker = self._mtmd_cpp.mtmd_default_marker().decode('utf-8')
+
+        # Initialize mtmd context
+        self.mtmd_ctx = self._mtmd_cpp.mtmd_init_from_file(
+            self.clip_model_path.encode(),
+            llama_model.model,
+            self.mctx_params
+        )
+
+        if self.mtmd_ctx is None:
+            raise ValueError(f"{self.log_prefix}(_init_mtmd_context): Failed to load mtmd context from: {self.clip_model_path}")
+
+        # Check if vision is supported
+        self.is_support_vision = self._mtmd_cpp.mtmd_support_vision(self.mtmd_ctx)
+        if self.is_support_vision:
+            if self.verbose:
+                print(f"{self.log_prefix}(_init_mtmd_context): Vision support detected.", file=sys.stderr)
+        else:
+            if self.verbose:
+                print(f"{self.log_prefix}(_init_mtmd_context): Vision is NOT supported by this mmproj model backend.", file=sys.stderr)
+
+        # Check if audio is supported
+        self.is_support_audio = self._mtmd_cpp.mtmd_support_audio(self.mtmd_ctx)
+        if self.is_support_audio:
+            if self.verbose:
+                print(f"{self.log_prefix}(_init_mtmd_context): Audio support detected.", file=sys.stderr)
+        else:
+            if self.verbose:
+                print(f"{self.log_prefix}(_init_mtmd_context): Audio is NOT supported by this mmproj model backend.", file=sys.stderr)
+
+    def close(self) -> None:
+        """Explicitly free the mtmd context and vision model resources."""
+        if getattr(self, "mtmd_ctx", None) is not None:
+            try:
+                self._mtmd_cpp.mtmd_free(self.mtmd_ctx)
+            except Exception:
+                pass
+            self.mtmd_ctx = None
+            self.mctx_params = None
+            self.chat_template = None
+
+        if getattr(self, "_exit_stack", None) is not None and hasattr(self._exit_stack, "close"):
+            self._exit_stack.close()
+            self._exit_stack = None
+
+    def __del__(self) -> None:
+        self.close()
+
+    def _get_media_items(self, messages: List[llama_types.ChatCompletionRequestMessage]) -> List[Dict[str, str]]:
+        """
+        Extracts all media payloads (images, audio) sequentially to maintain exact chronological order.
+        Strictly enforces capability checks, raising exceptions if unsupported media is passed.
+
+        Returns:
+            media_items: A list of dictionaries containing the media 'url' and its 'type' (image or audio).
+        """
+        media_items: List[Dict[str, str]] = []
+        for message in messages:
+            if isinstance(message.get("content"), list):
+                for content in message["content"]:
+                    content_type = content.get("type", "")
+
+                    # 1. Vision Processing
+                    if content_type == "image_url":
+                        if not self.is_support_vision:
+                            raise ValueError(f"{self.log_prefix}: This mmproj model instance does not support image inputs.")
+
+                        url = content["image_url"] if isinstance(content["image_url"], str) else content["image_url"]["url"]
+                        media_items.append({"url": url, "type": "image"})
+
+                    # 2. Audio Processing
+                    elif content_type in ["audio_url", "input_audio"]:
+                        if not self.is_support_audio:
+                            raise ValueError(f"{self.log_prefix}: This mmproj model instance does not support audio inputs.")
+
+                        # Case A: Handle custom/forward-compatible audio_url format
+                        if content == "audio_url":
+                            url = content["audio_url"] if isinstance(content["audio_url"], str) else content["audio_url"]["url"]
+                            media_items.append({"url": url, "type": "audio"})
+                        # Case B: Handle OpenAI standard input_audio format
+                        else:
+                            input_audio = content.get("input_audio", {})
+                            if isinstance(input_audio, dict) and "data" in input_audio:
+                                # It might just be raw base64 data, we can format it as a data URI to reuse load_audio logic
+                                # input_audio: {
+                                #     data: audio.base64Data,
+                                #     format: audio.mimeType.includes('wav') ? 'wav' : 'mp3'
+                                # }
+                                audio_data = input_audio.get("data", "")
+                                audio_format = input_audio.get("format", "")
+
+                                # Strictly align with llama.cpp (require wav/mp3)
+                                if audio_format not in ["wav", "mp3"]:
+                                    raise ValueError(f"{self.log_prefix}: input_audio.format must be either 'wav' or 'mp3'")
+
+                                # Format as a Data URI to reuse the unified load_media logic
+                                media_items.append({
+                                    "url": f"data:audio/{audio_format};base64,{audio_data}",
+                                    "type": "audio"
+                                })
+                            else:
+                                # Just a raw base64 data
+                                url = input_audio if isinstance(input_audio, str) else ""
+                                if url:
+                                    media_items.append({"url": url, "type": "audio"})
+
+                    # 3. Text & Unknown Types
+                    elif content_type == "text":
+                        continue
+                    else:
+                        if self.verbose:
+                            print(f"{self.log_prefix}: Ignored unknown content type '{content_type}'.", file=sys.stderr)
+        return media_items
+
+    def _create_bitmap_from_bytes(self, media_bytes: bytes):
+        """
+        Constructs an mtmd_bitmap structure from a raw byte buffer containing media data.
+
+        Supported formats:
+          - Images (via stb_image): jpg, png, bmp, etc.
+          - Audio (via miniaudio): wav, mp3, flac.
+
+        Note:
+          - Media types (Image vs. Audio) are auto-detected by the C++ backend using magic bytes.
+          - The underlying C++ helper function is thread-safe, making it suitable for concurrent preprocessing.
+
+        Args:
+            media_bytes (bytes): The raw byte content of the media file.
+
+        Returns:
+            mtmd_bitmap: A pointer to the allocated bitmap structure containing decoded media features.
+        """
+        if self.mtmd_ctx is None:
+            raise ValueError(f"{self.log_prefix}(_create_bitmap_from_bytes): mtmd context not initialized.")
+
+        # Create bitmap from buffer using helper function
+        bitmap = self._mtmd_cpp.mtmd_helper_bitmap_init_from_buf(
+            self.mtmd_ctx,
+            (ctypes.c_uint8 * len(media_bytes)).from_buffer(bytearray(media_bytes)),
+            len(media_bytes)
+        )
+
+        if bitmap is None:
+            raise ValueError(f"{self.log_prefix}(_create_bitmap_from_bytes): "
+                                "Failed to load image or audio file from media bytes "
+                                "(unsupported media format or corrupted data).")
+
+        return bitmap
+
+
+    def _process_mtmd_prompt(
+        self,
+        llama: llama.Llama,
+        messages: List[llama_types.ChatCompletionRequestMessage],
+    ) -> Tuple[List[int], List[tuple], Any, List[Any]]:
+        """
+        Core multimodal preprocessing pipeline.
+        Converts raw chat messages into C++ MTMD chunk structures and a virtual token ledger.
+
+        Features:
+        - Thread-safe concurrent media decoding to eliminate I/O bottlenecks.
+        - "Negative Reverse Vocabulary" mapping for O(1) prefix matching of media tokens.
+        - Strict RAII-style C++ memory management to prevent leaks on failure.
+
+        Returns:
+            full_prompt_ids: Ledger of text tokens and negative media IDs for prefix matching.
+            chunk_token_spans: Tuples of (start_idx, end_idx, chunk_ptr, chunk_type, media_id).
+            chunks: Allocated C++ mtmd_input_chunks pointer (must be freed by the caller).
+            bitmap_cleanup: List of C++ bitmap pointers to be freed after evaluation.
+        """
+        # 1. Inject default system prompt if omitted by the user
+        system_prompt = next((msg["content"] for msg in messages if msg.get("role") == "system"), "")
+        if system_prompt == "" and self.DEFAULT_SYSTEM_MESSAGE is not None:
+            messages = [{"role": "system", "content": self.DEFAULT_SYSTEM_MESSAGE}] + messages
+
+        media_items = self._get_media_items(messages)
+        media_marker = self.media_marker
+
+        # 2. Render the chat template and replace actual URLs with C++ media markers
+        text = self.chat_template.render(
+            messages=messages,
+            add_generation_prompt=True,
+            eos_token=self.mtmd_eos_token,
+            bos_token=self.mtmd_bos_token,
+            **getattr(self, 'extra_template_arguments', {})
+        )
+        # Replace image_url by media_marker in text
+        for item in media_items:
+            text = text.replace(item["url"], media_marker)
+
+        if self.verbose:
+            print(f"{self.log_prefix}(_process_mtmd_prompt): Rendered prompt length: {len(text)} chars, Media count: {len(media_items)}.", file=sys.stderr)
+            print(f"{self.log_prefix}(_process_mtmd_prompt): Rendered prompt: {text}", file=sys.stderr)
+
+        # 3. Pre-allocate bitmap array to guarantee chronological order during concurrent decoding
+        bitmaps = [None] * len(media_items)
+        bitmap_cleanup = []
+        chunks = None
+
+        try:
+            # Concurrent Media Decoding
+            import concurrent.futures
+            if media_items:
+                def _create_bitmap_func(idx: int, item: str):
+                    media_bytes = self.load_media(item["url"], item["type"])
+                    bitmap = self._create_bitmap_from_bytes(media_bytes)
+                    return idx, bitmap
+                # This method uses multi-threaded parallel processing to convert images or audio to bitmaps,
+                # which can be used in the future to process large numbers of video frames.
+                max_workers = min(llama.n_threads, len(media_items))
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = [executor.submit(_create_bitmap_func, i, item) for i, item in enumerate(media_items)]
+
+                    for future in concurrent.futures.as_completed(futures):
+                        idx, bitmap = future.result()
+                        bitmaps[idx] = bitmap
+                        bitmap_cleanup.append(bitmap)
+
+                # Strict validation: Abort if any thread failed to decode its assigned media
+                if any(b is None for b in bitmaps):
+                    raise RuntimeError(f"{self.log_prefix}(_create_bitmap_func): Failed to decode one or more media files.")
+                else:
+                    if self.verbose:
+                        print(f"{self.log_prefix}(_create_bitmap_func with {max_workers} threads): {len(media_items)} bitmaps were successfully created.")
+            else:
+                # If there are no images, set the bitmaps to empty.
+                bitmaps = []
+
+            # 4. Initialize mtmd_input_chunks
+            input_text = self._mtmd_cpp.mtmd_input_text()
+            input_text.text = text.encode('utf-8')
+            input_text.add_special = (llama.n_tokens == 0)
+            input_text.parse_special = True
+
+            chunks = self._mtmd_cpp.mtmd_input_chunks_init()
+            if chunks is None:
+                raise ValueError(f"{self.log_prefix}(mtmd_input_chunks_init): Failed to initialize mtmd_input_chunks.")
+
+            # 5. Hybrid Tokenization (Text + Media binding)
+            if len(bitmaps) > 0:
+                bitmap_array = (self._mtmd_cpp.mtmd_bitmap_p_ctypes * len(bitmaps))(*bitmaps)
+                result = self._mtmd_cpp.mtmd_tokenize(
+                    self.mtmd_ctx, chunks, ctypes.byref(input_text), bitmap_array, len(bitmaps)
+                )
+            else:
+                result = self._mtmd_cpp.mtmd_tokenize(
+                    self.mtmd_ctx, chunks, ctypes.byref(input_text), None, 0
+                )
+
+            if result != 0:
+                raise ValueError(f"{self.log_prefix}(mtmd_tokenize): Unable to tokenize prompt, res = {result}.")
+
+            # 6. Virtual Token Ledger Construction
+            full_prompt_ids = []
+            chunk_token_spans = []
+            current_idx = 0
+            n_chunks = self._mtmd_cpp.mtmd_input_chunks_size(chunks)
+
+            for i in range(n_chunks):
+                chunk = self._mtmd_cpp.mtmd_input_chunks_get(chunks, i)
+                if chunk is None: continue
+                chunk_type = self._mtmd_cpp.mtmd_input_chunk_get_type(chunk)
+
+                if chunk_type == self._mtmd_cpp.mtmd_input_chunk_type.MTMD_INPUT_CHUNK_TYPE_TEXT:
+                    # Extract standard text token IDs
+                    n_tokens_out = ctypes.c_size_t()
+                    tokens_ptr = self._mtmd_cpp.mtmd_input_chunk_get_tokens_text(chunk, ctypes.byref(n_tokens_out))
+                    if tokens_ptr and n_tokens_out.value > 0:
+                        tokens = [tokens_ptr[j] for j in range(n_tokens_out.value)]
+                        chunk_token_spans.append((current_idx, current_idx + len(tokens), chunk, chunk_type, None))
+                        full_prompt_ids.extend(tokens)
+                        current_idx += len(tokens)
+                elif chunk_type in [
+                        self._mtmd_cpp.mtmd_input_chunk_type.MTMD_INPUT_CHUNK_TYPE_IMAGE,
+                        self._mtmd_cpp.mtmd_input_chunk_type.MTMD_INPUT_CHUNK_TYPE_AUDIO
+                    ]:
+                    # Extract media properties
+                    chunk_n_tokens = self._mtmd_cpp.mtmd_input_chunk_get_n_tokens(chunk)
+                    chunk_id_bytes = self._mtmd_cpp.mtmd_input_chunk_get_id(chunk)
+
+                    if chunk_id_bytes:
+                        # Vocabulary Positive forward: 0 to 248,319 (Qwen3.5)
+                        # Create Negative Reverse Vocabulary ID: -100 to -16,777,316
+                        # Improved longest_token_prefix search matching performance
+                        media_id = - (abs(hash(chunk_id_bytes.decode('utf-8', errors='ignore'))) % (2**24)) - 100
+                    else:
+                        # Magic Negative Number as fallback :)
+                        media_id = -314159
+
+                    chunk_token_spans.append((current_idx, current_idx + chunk_n_tokens, chunk, chunk_type, media_id))
+
+                    # Pad the ledger with the pseudo-ID to mimic the physical space taken in the KV cache
+                    full_prompt_ids.extend([media_id] * chunk_n_tokens)
+                    current_idx += chunk_n_tokens
+                else:
+                    raise TypeError(f"{self.log_prefix}(mtmd_input_chunk_get_type): Invalid chunk type, chunk_type = {chunk_type}.")
+
+            return full_prompt_ids, chunk_token_spans, chunks, bitmap_cleanup
+
+        except Exception as e:
+            # Ensure no useless pointers remain upon any failure
+            # Free chunks
+            if chunks is not None:
+                self._mtmd_cpp.mtmd_input_chunks_free(chunks)
+                chunks = None
+            # Free bitmaps
+            if len(bitmap_cleanup) > 0:
+                for bitmap in bitmap_cleanup:
+                    self._mtmd_cpp.mtmd_bitmap_free(bitmap)
+                bitmap_cleanup = None
+            bitmaps = None
+
+            raise e
+
+    def __call__(
+        self,
+        *,
+        llama: llama.Llama,
+        messages: List[llama_types.ChatCompletionRequestMessage],
+        functions: Optional[List[llama_types.ChatCompletionFunction]] = None,
+        function_call: Optional[llama_types.ChatCompletionRequestFunctionCall] = None,
+        tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+        tool_choice: Optional[llama_types.ChatCompletionToolChoiceOption] = None,
+        temperature: float = 0.2,
+        top_p: float = 0.95,
+        top_k: int = 40,
+        min_p: float = 0.05,
+        typical_p: float = 1.0,
+        stream: bool = False,
+        stop: Optional[Union[str, List[str]]] = [],
+        seed: Optional[int] = None,
+        response_format: Optional[
+            llama_types.ChatCompletionRequestResponseFormat
+        ] = None,
+        max_tokens: Optional[int] = None,
+        present_penalty: float = 0.0,
+        frequency_penalty: float = 0.0,
+        repeat_penalty: float = 1.1,
+        top_n_sigma: float = -1.00,
+        mirostat_mode: int = 0,
+        mirostat_tau: float = 5.0,
+        mirostat_eta: float = 0.1,
+        xtc_threshold: float = 0.1,
+        xtc_probability: float = 0.0,
+        dry_multiplier: float = 0.0,
+        dry_base: float = 1.75,
+        dry_allowed_length: int = 2,
+        dry_penalty_last_n:int = 0,
+        dry_seq_breakers: list[str] = ["\n", ":", "\"", "*"],
+        adaptive_target : float = -1.0,
+        adaptive_decay : float = 0.9,
+        use_infill: bool = False,
+        model: Optional[str] = None,
+        logits_processor: Optional[llama.LogitsProcessorList] = None,
+        grammar: Optional[llama.LlamaGrammar] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        **kwargs,  # type: ignore
+    ) -> Union[
+        llama_types.CreateChatCompletionResponse,
+        Iterator[llama_types.CreateChatCompletionStreamResponse],
+    ]:
+        # 1. Initialize mtmd context
+        self._init_mtmd_context(llama)
+        assert self.mtmd_ctx is not None
+
+        # 2. Concurrent Preprocessing & Ledger Construction
+        full_prompt_ids, chunk_token_spans, chunks, bitmap_cleanup = self._process_mtmd_prompt(llama, messages)
+
+        if self.verbose:
+            print(f"{self.log_prefix}(__call__): Prepared virtual token ledger of length {len(full_prompt_ids)}.", file=sys.stderr)
+
+        try:
+            # 3. KV Cache Synchronization & State Rollback
+            # Compares the virtual ledger with physical history to prevent Cache Poisoning.
+            current_history = llama.input_ids[:llama.n_tokens].tolist()
+            longest_prefix = llama.longest_token_prefix(current_history, full_prompt_ids)
+
+            if longest_prefix < llama.n_tokens:
+                if llama.is_hybrid and llama._hybrid_cache_mgr is not None:
+                    if llama._hybrid_cache_mgr.max_checkpoints > 0:
+                        if self.verbose:
+                            print(f"{self.log_prefix}(__call__): Hybrid prefix mismatch (matched {longest_prefix}/{llama.n_tokens}). "
+                                f"Searching for nearest checkpoint...", file=sys.stderr)
+
+                        best_ckpt = llama._hybrid_cache_mgr.find_best_checkpoint(full_prompt_ids, seq_id=0)
+                        if best_ckpt and llama._hybrid_cache_mgr.restore_checkpoint(best_ckpt, seq_id=0):
+                            llama.n_tokens = best_ckpt.pos
+                            if self.verbose:
+                                print(f"{self.log_prefix}(__call__): Successfully rolled back to checkpoint at pos {llama.n_tokens}.", file=sys.stderr)
+                        else:
+                            llama._hybrid_cache_mgr.clear()
+                            llama._ctx.memory_clear(True)
+                            llama.n_tokens = 0
+                    else:
+                        llama._hybrid_cache_mgr.clear()
+                        llama._ctx.memory_clear(True)
+                        llama.n_tokens = 0
+                else:
+                    if self.verbose:
+                        print(f"{self.log_prefix}(__call__): Prefix mismatch. Truncating KV cache from {llama.n_tokens} to {longest_prefix}.", file=sys.stderr)
+                    llama._ctx.memory_seq_rm(0, longest_prefix, -1)
+                    llama.n_tokens = longest_prefix
+
+            n_past = llama.n_tokens
+
+            for start_idx, end_idx, chunk_ptr, chunk_type, media_id in chunk_token_spans:
+                # Skip previously matched chunks
+                if end_idx <= n_past:
+                    continue
+
+                if chunk_type == self._mtmd_cpp.mtmd_input_chunk_type.MTMD_INPUT_CHUNK_TYPE_TEXT:
+                    unprocessed_start = max(start_idx, n_past) - start_idx
+                    n_tokens_out = ctypes.c_size_t()
+                    tokens_ptr = self._mtmd_cpp.mtmd_input_chunk_get_tokens_text(chunk_ptr, ctypes.byref(n_tokens_out))
+
+                    if tokens_ptr and n_tokens_out.value > 0:
+                        all_tokens = [tokens_ptr[j] for j in range(n_tokens_out.value)]
+                        tokens_to_eval = all_tokens[unprocessed_start:]
+
+                        if tokens_to_eval:
+                            if self.verbose:
+                                print(f"{self.log_prefix}(__call__): Evaluating TEXT chunk ({len(tokens_to_eval)} tokens) at pos {llama.n_tokens}...", file=sys.stderr)
+                            # Text evaluation delegates shift and chunking to native llama.eval
+                            llama.eval(tokens_to_eval)
+                            n_past = llama.n_tokens
+
+                elif chunk_type in [
+                        self._mtmd_cpp.mtmd_input_chunk_type.MTMD_INPUT_CHUNK_TYPE_IMAGE,
+                        self._mtmd_cpp.mtmd_input_chunk_type.MTMD_INPUT_CHUNK_TYPE_AUDIO
+                    ]:
+                    chunk_n_tokens = self._mtmd_cpp.mtmd_input_chunk_get_n_tokens(chunk_ptr)
+
+                    if self.verbose:
+                        media_str = "IMAGE" if chunk_type == self._mtmd_cpp.mtmd_input_chunk_type.MTMD_INPUT_CHUNK_TYPE_IMAGE else "AUDIO"
+                        print(f"{self.log_prefix}(__call__): Evaluating {media_str} chunk ({chunk_n_tokens} tokens) at pos {llama.n_tokens}...", file=sys.stderr)
+
+                    # Stage 5: Multimodal Physical OOM Defense
+                    if n_past + chunk_n_tokens > llama.n_ctx():
+                        if llama._ctx.memory_can_shift():
+                            raise RuntimeError(
+                                f"{self.log_prefix}(__call__): Context Shift is explicitly disabled by the C++ backend "
+                                f"(n_pos_per_embd > 1 or incompatible M-RoPE). "
+                                f"Multimodal chunk exceeded context limit(currently n_ctx={llama._n_ctx}), "
+                                f"You MUST increase n_ctx to fit the dialogue."
+                            )
+                        else:
+                            # Safely discard oldest tokens while preserving system prompts
+                            n_discard = (n_past + chunk_n_tokens) - llama.n_ctx() + llama.n_batch
+                            n_keep = min(llama.n_keep, n_past)
+                            n_discard = min(n_discard, n_past - n_keep)
+
+                            if n_discard <= 0:
+                                raise RuntimeError(f"{self.log_prefix}(__call__): Critical Overflow. Not enough unpinned tokens to discard for Context Shift.")
+
+                            if self.verbose:
+                                print(f"{self.log_prefix}(__call__): OOM risk detected. Shifting multimodal context: keeping {n_keep}, discarding {n_discard}...", file=sys.stderr)
+
+                            # Execute physical memory shift
+                            llama._ctx.memory_seq_rm(0, n_keep, n_keep + n_discard)
+                            llama._ctx.memory_seq_add(0, n_keep + n_discard, n_past, -n_discard)
+
+                            # Shift python virtual array to match
+                            remaining_len = n_past - (n_keep + n_discard)
+                            if remaining_len > 0:
+                                llama.input_ids[n_keep : n_keep + remaining_len] = llama.input_ids[n_keep + n_discard : n_past]
+
+                            n_past -= n_discard
+                            llama.n_tokens = n_past
+
+                    # Execute C++ Multimodal Black-box Extraction
+                    new_n_past = llama_cpp.llama_pos(0)
+                    result = self._mtmd_cpp.mtmd_helper_eval_chunk_single(
+                        self.mtmd_ctx,
+                        llama._ctx.ctx,
+                        chunk_ptr,
+                        llama_cpp.llama_pos(n_past),
+                        llama_cpp.llama_seq_id(0),
+                        llama.n_batch,
+                        True, # logits_last = True, drastically saves computational overhead
+                        ctypes.byref(new_n_past)
+                    )
+
+                    if result != 0:
+                        raise ValueError(f"{self.log_prefix}(mtmd_helper_eval_chunk_single): Media evaluation failed with error code {result}.")
+
+                    # Update Ledger with "Negative Reverse Vocabulary" IDs
+                    llama.input_ids[n_past : new_n_past.value] = media_id
+                    n_past = new_n_past.value
+                    llama.n_tokens = n_past
+
+            # Extract the final, perfectly synchronized prompt sequence
+            prompt = llama.input_ids[: llama.n_tokens].tolist()
+
+            # End-of-Turn Checkpoint
+            # Anchors the state ONLY after the entire multi-modal turn is processed
+            if (
+                llama.is_hybrid
+                and llama._hybrid_cache_mgr is not None
+                and llama._hybrid_cache_mgr.max_checkpoints > 0
+            ):
+                if self.verbose:
+                    print(f"{self.log_prefix}(__call__): [End-of-Turn Checkpoint] Anchoring full prompt state at pos {llama.n_tokens}.", file=sys.stderr)
+
+                llama._hybrid_cache_mgr.save_checkpoint(
+                    current_pos=llama.n_tokens,
+                    tokens=prompt,
+                    seq_id=0
+                )
+        finally:
+            # Cleanup chunks
+            if chunks is not None:
+                self._mtmd_cpp.mtmd_input_chunks_free(chunks)
+                chunks = None
+            # Cleanup bitmaps
+            if bitmap_cleanup:
+                for bitmap in bitmap_cleanup:
+                    self._mtmd_cpp.mtmd_bitmap_free(bitmap)
+                bitmap_cleanup.clear()
+            bitmap_array = None
+
+        # Handle response format and tools (same as before)
+        if response_format is not None and response_format["type"] == "json_object":
+            grammar = _grammar_for_response_format(response_format)
+
+        # Convert legacy functions to tools
+        if functions is not None:
+            tools = [
+                {
+                    "type": "function",
+                    "function": function,
+                }
+                for function in functions
+            ]
+
+        # Convert legacy function_call to tool_choice
+        if function_call is not None:
+            if isinstance(function_call, str) and (
+                function_call == "none" or function_call == "auto"
+            ):
+                tool_choice = function_call
+            if isinstance(function_call, dict) and "name" in function_call:
+                tool_choice = {
+                    "type": "function",
+                    "function": {
+                        "name": function_call["name"],
+                    },
+                }
+
+        tool = None
+        if (
+            tool_choice is not None
+            and isinstance(tool_choice, dict)
+            and tools is not None
+        ):
+            name = tool_choice["function"]["name"]
+            tool = next((t for t in tools if t["function"]["name"] == name), None)
+            if tool is None:
+                raise ValueError(f"Tool choice '{name}' not found in tools.")
+            schema = tool["function"]["parameters"]
+            try:
+                # create grammar from json schema
+                grammar = llama_grammar.LlamaGrammar.from_json_schema(
+                    json.dumps(schema), verbose=llama.verbose
+                )
+            except Exception as e:
+                if llama.verbose:
+                    print(str(e), file=sys.stderr)
+                grammar = llama_grammar.LlamaGrammar.from_string(
+                    llama_grammar.JSON_GBNF, verbose=llama.verbose
+                )
+
+        completion_or_chunks = llama.create_completion(
+            prompt=prompt,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            typical_p=typical_p,
+            logprobs=top_logprobs if logprobs else None,
+            stream=stream,
+            stop=stop,
+            seed=seed,
+            max_tokens=max_tokens,
+            present_penalty=present_penalty,
+            frequency_penalty=frequency_penalty,
+            repeat_penalty=repeat_penalty,
+            top_n_sigma=top_n_sigma,
+            mirostat_mode=mirostat_mode,
+            mirostat_tau=mirostat_tau,
+            mirostat_eta=mirostat_eta,
+            xtc_threshold=xtc_threshold,
+            xtc_probability=xtc_probability,
+            dry_multiplier=dry_multiplier,
+            dry_base=dry_base,
+            dry_allowed_length=dry_allowed_length,
+            dry_penalty_last_n=dry_penalty_last_n,
+            dry_seq_breakers=dry_seq_breakers,
+            adaptive_target=adaptive_target,
+            adaptive_decay=adaptive_decay,
+            use_infill=use_infill,
+            model=model,
+            logits_processor=logits_processor,
+            grammar=grammar,
+            logit_bias=logit_bias,
+        )
+
+        if tool is not None:
+            tool_name = tool["function"]["name"]
+            return _convert_completion_to_chat_function(
+                tool_name, completion_or_chunks, stream
+            )
+        return _convert_completion_to_chat(completion_or_chunks, stream=stream)
+
+    def load_media(self, media_url: str, media_type: str) -> bytes:
+        """
+        Unified dispatcher for loading media payloads.
+        Routes the URL/URI to the specific image or audio processor based on the media_type.
+        """
+        if media_type == "image":
+            return self._load_image(media_url)
+        elif media_type == "audio":
+            audio_bytes = self._load_audio(media_url)
+            # Apply ironclad magic bytes validation before returning
+            try:
+                self.detect_audio_format(audio_bytes)
+            except ValueError as e:
+                raise ValueError(f"{self.log_prefix}(load_media): {e}")
+            return audio_bytes
+        else:
+            raise ValueError(f"{self.log_prefix}(load_media): Unknown media type '{media_type}'")
+
+    @staticmethod
+    def detect_audio_format(audio_bytes: bytes) -> str:
+        """
+        Pure utility function: Detects the audio format from magic bytes.
+        Strictly translated from llama.cpp's `is_audio_file` to ensure 100% compatibility
+        and avoid false positives (e.g., AVI files disguised as RIFF).
+        """
+        length = len(audio_bytes)
+
+        if length < 12:
+            raise ValueError("Audio data is corrupted or too small (less than 12 bytes).")
+
+        # RIFF & WAVE magic bytes verification
+        is_wav = audio_bytes.startswith(b"RIFF") and audio_bytes[8:12] == b"WAVE"
+
+        # ID3 metadata or MPEG sync word verification
+        is_mp3 = length >= 3 and (
+            audio_bytes.startswith(b"ID3") or
+            (audio_bytes[0] == 0xFF and (audio_bytes[1] & 0xE0) == 0xE0)
+        )
+
+        # FLAC magic bytes verification
+        is_flac = audio_bytes.startswith(b"fLaC")
+
+        if is_wav:
+            return "wav"
+        elif is_mp3:
+            return "mp3"
+        elif is_flac:
+            return "flac"
+        else:
+            raise ValueError(
+                "Unsupported audio format detected via magic bytes. "
+                "The underlying C++ miniaudio backend ONLY supports WAV, MP3, and FLAC."
+            )
+
+    @staticmethod
+    def _load_audio(audio_url: str) -> bytes:
+        """
+        Load audio from either a URL, local path, or a data URI and return raw bytes.
+        """
+
+        audio_bytes = b""
+
+        # 1. Handle data URI (base64)
+        if audio_url.strip().startswith("data:"):
+            comma_pos = audio_url.find(",")
+            if comma_pos == -1:
+                raise ValueError("Invalid data URI: missing comma separator")
+            base64_data = audio_url[comma_pos + 1 :]
+            audio_bytes = base64.b64decode(base64_data)
+
+        # 2. Handle local file path
+        elif os.path.exists(audio_url):
+            with open(audio_url, "rb") as f:
+                audio_bytes = f.read()
+
+        # 3. Handle remote URL via HTTP/HTTPS
+        else:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            req = urllib.request.Request(audio_url, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=15) as f:
+                    audio_bytes = f.read()
+            except (URLError, HTTPError) as e:
+                raise ConnectionError(f"Failed to download audio from {audio_url}: {e}")
+
+        if not audio_bytes:
+            raise ValueError("Empty audio data received")
+
+        return audio_bytes
+
+    @staticmethod
+    def _load_image(image_url: str) -> bytes:
+        """
+        Load an image from either a URL or a data URI and return it as JPEG bytes.
+
+        Supports:
+        - Remote images via HTTP/HTTPS (with proper User-Agent)
+        - Data URIs (base64-encoded, e.g., data:image/png;base64,...)
+        - Images with alpha channel (PNG, WebP, etc.) → automatically composites on white/black background
+        - Any format that Pillow can open. See: https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html
+
+        Returns:
+            JPEG-encoded bytes (quality=95) in RGB mode, suitable for most vision models.
+        """
+        image_bytes = b""
+
+        # 1. Handle data URI (base64)
+        if image_url.strip().startswith("data:"):
+            # Split only once from the right to correctly handle mime types containing commas
+            comma_pos = image_url.find(",")
+            if comma_pos == -1:
+                raise ValueError("Invalid data URI: missing comma separator")
+            base64_data = image_url[comma_pos + 1 :]
+            image_bytes = base64.b64decode(base64_data)
+
+        # 2. Handle local/remote URL
+        else:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            req = urllib.request.Request(image_url, headers=headers)
+
+            try:
+                with urllib.request.urlopen(req, timeout=15) as f:
+                    image_bytes = f.read()
+            except (URLError, HTTPError) as e:
+                raise ConnectionError(f"Failed to download image from {image_url}: {e}")
+
+        if not image_bytes:
+            raise ValueError("Empty image data received")
+
+        # 3. Open image with Pillow
+        try:
+            from PIL import Image, ImageStat
+        except ImportError:
+            raise ImportError("Pillow is required for image processing. Install with: pip install pillow")
+
+        import io
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # 4. Handle transparency (RGBA, LA, P with transparency, etc.)
+        if image.mode in ("RGBA", "LA", "PA") or (image.mode == "P" and "transparency" in image.info):
+            # Use alpha channel as mask
+            if image.mode == "P":
+                image = image.convert("RGBA")
+
+            alpha = image.split()[-1]  # Last channel is alpha
+            # Compute average brightness of visible (non-transparent) pixels
+            stat = ImageStat.Stat(image.convert("L"), mask=alpha)
+
+            # Choose background: white for dark content, black for bright content
+            bg_color = (255, 255, 255)  # white
+            if stat.count[0] > 0 and stat.mean[0] > 127:
+                bg_color = (0, 0, 0)  # black
+
+            background = Image.new("RGB", image.size, bg_color)
+            background.paste(image, mask=alpha)
+            image = background
+
+        # 5. Ensure RGB mode for formats like CMYK, palette, etc.
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+
+        # 6. Save as high-quality JPEG, suitable for most vision models.
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=95, optimize=True, progressive=True)
+        return output.getvalue()
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        repo_id: str,
+        filename: Optional[str],
+        local_dir: Optional[Union[str, os.PathLike[str]]] = None,
+        local_dir_use_symlinks: Union[bool, Literal["auto"]] = "auto",
+        cache_dir: Optional[Union[str, os.PathLike[str]]] = None,
+        **kwargs: Any,
+    ) -> "MTMDChatHandler":
+        import fnmatch
+        from pathlib import Path
+
+        try:
+            from huggingface_hub import hf_hub_download, HfFileSystem  # type: ignore
+            from huggingface_hub.utils import validate_repo_id  # type: ignore
+        except ImportError:
+            raise ImportError(
+                "Llama.from_pretrained requires the huggingface-hub package. "
+                "You can install it with `pip install huggingface-hub`."
+            )
+
+        validate_repo_id(repo_id)
+
+        hffs = HfFileSystem()
+
+        files = [
+            file["name"] if isinstance(file, dict) else file
+            for file in hffs.ls(repo_id)  # type: ignore
+        ]
+
+        # split each file into repo_id, subfolder, filename
+        file_list: List[str] = []
+        for file in files:
+            rel_path = Path(file).relative_to(repo_id)
+            file_list.append(str(rel_path))
+
+        matching_files = [file for file in file_list if fnmatch.fnmatch(file, filename)]  # type: ignore
+
+        if len(matching_files) == 0:
+            raise ValueError(
+                f"No file found in {repo_id} that match {filename}\n\n"
+                f"Available Files:\n{json.dumps(file_list)}"
+            )
+
+        if len(matching_files) > 1:
+            raise ValueError(
+                f"Multiple files found in {repo_id} matching {filename}\n\n"
+                f"Available Files:\n{json.dumps(files)}"
+            )
+
+        (matching_file,) = matching_files
+
+        subfolder = str(Path(matching_file).parent)
+        filename = Path(matching_file).name
+
+        # download the file
+        hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            subfolder=subfolder,
+            local_dir=cast(Union[str, Path, None], local_dir),
+            local_dir_use_symlinks=local_dir_use_symlinks,
+            cache_dir=cast(Union[str, Path, None], cache_dir),
+        )
+
+        if local_dir is None:
+            model_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                subfolder=subfolder,
+                local_dir=local_dir,
+                local_dir_use_symlinks=local_dir_use_symlinks,
+                cache_dir=cast(Union[str, Path, None], cache_dir),
+                local_files_only=True,
+            )
+        else:
+            model_path = os.path.join(local_dir, filename)
+
+        return cls(
+            clip_model_path=model_path,
+            **kwargs,
+        )
+
+
+class Llava15ChatHandler(MTMDChatHandler):
+    CHAT_FORMAT = (
+        "{% for message in messages %}"
+            "{% if message.role == 'system' %}"
+                "{{ message.content }}"
+            "{% endif %}"
+
+            "{% if message.role == 'user' %}"
+                "{% if message.content is string %}"
+                    "\nUSER: {{ message.content }}"
+                "{% elif message.content is iterable %}"
+                    "\nUSER: "
+                    "{% for content in message.content %}"
+                        "{% if content.type == 'image_url' %}"
+                            "{{ content.image_url if content.image_url is string else content.image_url.url }}"
+                        "{% endif %}"
+                    "{% endfor %}"
+                    "{% for content in message.content %}"
+                        "{% if content.type == 'text' %}"
+                            "{{ content.text }}"
+                        "{% endif %}"
+                    "{% endfor %}"
+                "{% endif %}"
+            "{% endif %}"
+
+            "{% if message.role == 'assistant' and message.content is not none %}"
+                "\nASSISTANT: {{ message.content }}"
+            "{% endif %}"
+        "{% endfor %}"
+
+        "{% if add_generation_prompt %}"
+            "\nASSISTANT: "
+        "{% endif %}"
+    )
+
+
+class ObsidianChatHandler(MTMDChatHandler):
+    # Prompt Format
+    # The model followed ChatML format. However, with ### as the seperator
+
+    # <|im_start|>user
+    # What is this sign about?\n<image>
+    # ###
+    # <|im_start|>assistant
+    # The sign is about bullying, and it is placed on a black background with a red background.
+    # ###
+
+    CHAT_FORMAT = (
+        "{% for message in messages %}"
+        # System message
+        "{% if message.role == 'system' %}"
+        "<|im_start|>system\n"
+        "{{ message.content }}\n"
+        "###\n"
+        "{% endif %}"
+        # User message
+        "{% if message.role == 'user' %}"
+        "<|im_start|>user\n"
+        "{% if message.content is string %}"
+        "{{ message.content }}"
+        "{% endif %}"
+        "{% if message.content is iterable %}"
+        "{% for content in message.content %}"
+        "{% if content.type == 'image_url' and content.image_url is string %}"
+        "{{ content.image_url }}"
+        "{% endif %}"
+        "{% if content.type == 'image_url' and content.image_url is mapping %}"
+        "{{ content.image_url.url }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% for content in message.content %}"
+        "{% if content.type == 'text' %}"
+        "{{ content.text }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% endif %}"
+        "###\n"
+        "{% endif %}"
+        # Assistant message
+        "{% if message.role == 'assistant' %}"
+        "<|im_start|>assistant\n"
+        "{{ message.content }}"
+        "###\n"
+        "{% endif %}"
+        "{% endfor %}"
+        # Generation prompt
+        "{% if add_generation_prompt %}"
+        "<|im_start|>assistant\n"
+        "{% endif %}"
+    )
+
+
+class MoondreamChatHandler(MTMDChatHandler):
+    # Chat Format:
+    # f"<image>\n\n{chat_history}Question: {question}\n\nAnswer:"
+    CHAT_FORMAT = (
+        "{% for message in messages %}"
+        "{% if message.role == 'user' %}"
+        "{% if message.content is iterable %}"
+        # <image>
+        "{% for content in message.content %}"
+        "{% if content.type == 'image_url' %}"
+        "{% if content.image_url is string %}"
+        "{{ content.image_url }}\n\n"
+        "{% endif %}"
+        "{% if content.image_url is mapping %}"
+        "{{ content.image_url.url }}\n\n"
+        "{% endif %}"
+        "{% endif %}"
+        "{% endfor %}"
+        # Question:
+        "{% for content in message.content %}"
+        "{% if content.type == 'text' %}"
+        "Question: {{ content.text }}\n\n"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% endif %}"
+        # Question:
+        "{% if message.content is string %}"
+        "Question: {{ message.content }}\n\n"
+        "{% endif %}"
+        "{% endif %}"
+        # Answer:
+        "{% if message.role == 'assistant' %}"
+        "Answer:{{ message.content }}\n\n"
+        "{% endif %}"
+        "{% endfor %}"
+        # Generation prompt
+        "{% if add_generation_prompt %}"
+        "Answer:"
+        "{% endif %}"
+    )
+
+
+class Llava16ChatHandler(MTMDChatHandler):
+    # Example prompt
+    # "DEFAULT_SYSTEM_MESSAGE + USER: <image>\nWhat is shown in this image? ASSISTANT:"
+
+    CHAT_FORMAT = (
+        "{% for message in messages %}"
+        "{% if message.role == 'system' %}"
+        "{{ message.content }}"
+        "{% endif %}"
+        "{% if message.role == 'user' %}"
+        "{% if message.content is iterable %}"
+        # <image>
+        "{% for content in message.content %}"
+        "{% if content.type == 'image_url' %}"
+        "{% if content.image_url is string %}"
+        "{{ content.image_url }}\n"
+        "{% endif %}"
+        "{% if content.image_url is mapping %}"
+        "{{ content.image_url.url }}\n"
+        "{% endif %}"
+        "{% endif %}"
+        "{% endfor %}"
+        # Question:
+        "{% for content in message.content %}"
+        "{% if content.type == 'text' %}"
+        "{{ content.text }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% endif %}"
+        # Question:
+        "{% if message.content is string %}"
+        "{{ message.content }}"
+        "{% endif %}"
+        "{% endif %}"
+        # Answer:
+        "{% if message.role == 'assistant' %}"
+        "{{ message.content }}"
+        "{% endif %}"
+        "{% endfor %}"
+        # Generation prompt
+        "{% if add_generation_prompt %}"
+        "Answer:"
+        "{% endif %}"
+    )
+
+
+class NanoLlavaChatHandler(MTMDChatHandler):
+    # Prompt Format
+    # The model follow the ChatML standard, however, without \n at the end of <|im_end|>:
+
+    # <|im_start|>system
+    # Answer the question<|im_end|><|im_start|>user
+    # <image>
+    # What is the picture about?<|im_end|><|im_start|>assistant
+    DEFAULT_SYSTEM_MESSAGE = "Answer the question"
+
+    CHAT_FORMAT = (
+        "{% for message in messages %}"
+        # System message
+        "{% if message.role == 'system' %}"
+        "<|im_start|>system\n"
+        "{{ message.content }}"
+        "<|im_end|>"
+        "{% endif %}"
+        # User message
+        "{% if message.role == 'user' %}"
+        "<|im_start|>user\n"
+        "{% if message.content is string %}"
+        "{{ message.content }}"
+        "{% endif %}"
+        "{% if message.content is iterable %}"
+        "{% for content in message.content %}"
+        "{% if content.type == 'image_url' and content.image_url is string %}"
+        "{{ content.image_url }}"
+        "{% endif %}"
+        "{% if content.type == 'image_url' and content.image_url is mapping %}"
+        "{{ content.image_url.url }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% for content in message.content %}"
+        "{% if content.type == 'text' %}"
+        "{{ content.text }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% endif %}"
+        "<|im_end|>"
+        "{% endif %}"
+        # Assistant message
+        "{% if message.role == 'assistant' %}"
+        "<|im_start|>assistant\n"
+        "{{ message.content }}"
+        "<|im_end|>"
+        "{% endif %}"
+        "{% endfor %}"
+        # Generation prompt
+        "{% if add_generation_prompt %}"
+        "<|im_start|>assistant\n"
+        "{% endif %}"
+    )
+
+
+class Llama3VisionAlphaChatHandler(MTMDChatHandler):
+    # question = "<image>" + q
+
+    # prompt = f"<|start_header_id|>user<|end_header_id|>\n\n{question}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+
+    CHAT_FORMAT = (
+        "{% for message in messages %}"
+        "<|start_header_id|>"
+        "{% if message.role == 'user' %}"
+        "user<|end_header_id|>\n\n"
+        "{% if message.content is iterable %}"
+        # <image>
+        "{% for content in message.content %}"
+        "{% if content.type == 'image_url' %}"
+        "{% if content.image_url is string %}"
+        "{{ content.image_url }}"
+        "{% endif %}"
+        "{% if content.image_url is mapping %}"
+        "{{ content.image_url.url }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% endfor %}"
+        # Question:
+        "{% for content in message.content %}"
+        "{% if content.type == 'text' %}"
+        "{{ content.text }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% endif %}"
+        # Question:
+        "{% if message.content is string %}"
+        "{{ message.content }}"
+        "{% endif %}"
+        "{% endif %}"
+        # Answer:
+        "{% if message.role == 'assistant' %}"
+        "assistant<|end_header_id|>\n\n"
+        "{{ message.content }}"
+        "{% endif %}"
+        "<|eot_id|>"
+        "{% endfor %}"
+        # Generation prompt
+        "{% if add_generation_prompt %}"
+        "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        "{% endif %}"
+    )
+
+
+# alias
+Llama3VisionAlpha = Llama3VisionAlphaChatHandler
+
+
+class MiniCPMv26ChatHandler(MTMDChatHandler):
+
+    CHAT_FORMAT = (
+        "{% set image_count = namespace(value=0) %}"
+        "{% for message in messages %}"
+        "{% if loop.first and messages[0]['role'] != 'system' %}"
+        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+        "{% endif %}"
+        "<|im_start|>{{ message['role'] }}\n"
+        "{% if message['content'] is iterable %}"
+        "{% for content in message['content'] %}"
+        "{% if content.type == 'image_url' %}"
+        "{% if content.image_url is string %}"
+        "{% set image_count.value = image_count.value + 1 %}"
+        "<image_id>{{ image_count.value }}</image_id>: <image>{{ content.image_url }}</image>"
+        "{% endif %}"
+        "{% if content.image_url is mapping %}"
+        "{% set image_count.value = image_count.value + 1 %}"
+        "<image_id>{{ image_count.value }}</image_id>: <image>{{ content.image_url.url }}</image>"
+        "{% endif %}"
+        "{% endif %}"
+        "{% endfor %}"
+
+        "{% for content in message['content'] %}"
+        "{% if content.type == 'text' %}"
+        "{{ content.text }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% endif %}"
+        "{% if message['content'] is string %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "<|im_end|>\n"
+        "{% endfor %}"
+        "{% if add_generation_prompt %}"
+        "<|im_start|>assistant\n"
+        "{% endif %}"
+    )
+
+
+class MiniCPMv45ChatHandler(MTMDChatHandler):
+    """
+    Handler for MiniCPM-V 4.5 models.
+
+    Supports:
+    - Multi-step tool calls with <tool_call> and <tool_response> XML tags.
+    - Integrated reasoning (thinking) process with <think> tags.
+    - Specialized system prompt handling with tool definitions.
+    - Global image numbering for multi-image processing.
+    """
+
+    # Model specific control tokens
+    MINICPMV_BOS_TOKEN = "<|im_start|>"
+    MINICPMV_EOS_TOKEN = "<|im_end|>"
+    MINICPMV_PAD_TOKEN = "<|endoftext|>"
+
+    # Image placeholder tags
+    MINICPMV_IMAGE_START_TOKEN = "<image>"
+    MINICPMV_IMAGE_END_TOKEN = "</image>"
+    MINICPMV_IMAGE_ID_START_TOKEN = "<image_id>"
+    MINICPMV_IMAGE_ID_END_TOKEN = "</image_id>"
+
+    CHAT_FORMAT = (
+        # --- 1. First System Message & Tools Definitions ---
+        "{%- if tools %}"
+            "{{- '" + MINICPMV_BOS_TOKEN + "system\\n' }}"
+            "{%- if messages[0].role == 'system' %}{{- messages[0].content + '\\n\\n' }}{%- endif %}"
+            "{{- '# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\n' }}"
+            "{{- 'You are provided with function signatures within <tools></tools> XML tags:\\n<tools>' }}"
+            "{%- for tool in tools %}{{- '\\n' + (tool | tojson) }}{%- endfor %}"
+            "{{- '\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\\n</tool_call>" + MINICPMV_EOS_TOKEN + "\\n' }}"
+        "{%- elif messages[0].role == 'system' %}"
+            "{{- '" + MINICPMV_BOS_TOKEN + "system\\n' + messages[0].content + '" + MINICPMV_EOS_TOKEN + "\\n' }}"
+        "{%- endif %}"
+
+        # --- 2. Message Stream Processing ---
+        "{% set image_count = namespace(value=0) %}"
+        "{%- for message in messages %}"
+            # --- Unified Role Handling (User, Assistant, and subsequent Systems) ---
+            "{%- if message.role in ['user', 'assistant'] or (message.role == 'system' and not loop.first) %}"
+                "{{- '" + MINICPMV_BOS_TOKEN + "' + message.role + '\\n' }}"
+
+                "{%- set content = message.content %}"
+                "{%- if content is not string %}"
+                    "{%- set ns = namespace(content_str='') %}"
+                    "{%- for item in content %}"
+                        # --- Explicit image_url type and value checking ---
+                        "{%- if item.type == 'image_url' %}"
+                            "{%- set image_url = item.image_url if item.image_url is string else item.image_url.url %}"
+                            "{%- set image_count.value = image_count.value + 1 %}"
+                            # Format: <image_id>N</image_id>: <image>IMAGE_URL</image>
+                            "{%- set ns.content_str = ns.content_str + '<image_id>' + (image_count.value | string) + '</image_id>: <image>' + image_url + '</image>' %}"
+                        "{%- elif item.type == 'text' %}"
+                            "{%- set ns.content_str = ns.content_str + item.text %}"
+                        "{%- endif %}"
+                    "{%- endfor %}"
+                    "{%- set content = ns.content_str %}"
+                "{%- endif %}"
+
+                "{{- content -}}"
+
+                # Append tool_calls to assistant messages if they exist
+                "{%- if message.role == 'assistant' and message.tool_calls %}"
+                    "{%- for tool_call in message.tool_calls %}"
+                        "{%- set tc = tool_call.function if tool_call.function else tool_call %}"
+                        "{{- '\\n<tool_call>\\n{\"name\": \"' + tc.name + '\", \"arguments\": ' }}"
+                        "{{- tc.arguments if tc.arguments is string else tc.arguments | tojson }}"
+                        "{{- '}\\n</tool_call>' }}"
+                    "{%- endfor %}"
+                "{%- endif %}"
+                "{{- '" + MINICPMV_EOS_TOKEN + "\\n' }}"
+
+            # --- Specialized Tool Response Handling ---
+            # Group consecutive tool responses under a single user-like block
+            "{%- elif message.role == 'tool' %}"
+                "{%- if loop.first or (messages[loop.index0 - 1].role != 'tool') %}"
+                    "{{- '" + MINICPMV_BOS_TOKEN + "user' }}"
+                "{%- endif %}"
+                "{{- '\\n<tool_response>\\n' + message.content + '\\n</tool_response>' }}"
+                "{%- if loop.last or (messages[loop.index0 + 1].role != 'tool') %}"
+                    "{{- '" + MINICPMV_EOS_TOKEN + "\\n' }}"
+                "{%- endif %}"
+            "{%- endif %}"
+        "{%- endfor %}"
+
+        # --- 3. Generation Prompt ---
+        "{%- if add_generation_prompt %}"
+            "{{- '" + MINICPMV_BOS_TOKEN + "assistant\\n' }}"
+            # Handle thinking/reasoning block visibility based on configuration
+            "{%- if enable_thinking is defined and enable_thinking is false %}"
+                "{{- '<think>\\n\\n</think>\\n\\n' }}"
+            "{%- elif enable_thinking is defined and enable_thinking is true %}"
+                "{{- '<think>\\n' }}"
+            "{%- endif %}"
+        "{%- endif %}"
+    )
+
+    def __init__(self, enable_thinking: bool = True, **kwargs):
+        """
+        Initializes the MiniCPM-V 4.5 Handler.
+
+        Args:
+            enable_thinking (bool): If True, model generates reasoning before the final answer.
+            **kwargs: Additional arguments for the base MTMDChatHandler.
+        """
+        self.enable_thinking = enable_thinking
+        super().__init__(**kwargs)
+
+    def __call__(self, **kwargs):
+        # Inject thinking control flag into the template
+        self.extra_template_arguments["enable_thinking"] = self.enable_thinking
+
+        # Set stop token patch
+        kwargs['stop'] = [self.MINICPMV_EOS_TOKEN, self.MINICPMV_PAD_TOKEN]
+
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix}(enable_thinking={self.enable_thinking}) - Start processing")
+        return super().__call__(**kwargs)
+
+
+class Gemma3ChatHandler(MTMDChatHandler):
+
+    GEMMA3_BOI_TOKEN  = "<start_of_image>"
+    GEMMA3_EOI_TOKEN = "<end_of_image>"
+    GEMMA3_BOS_TOKEN = "<bos>"
+    GEMMA3_EOS_TOKEN = "<eos>"
+
+    CHAT_FORMAT = (
+        "{% if messages[0]['role'] == 'system' %}"
+        "{% set loop_messages = messages[1:] %}"
+        "{% if messages[0]['content'] is string %}"
+        "{% set first_user_prefix = messages[0]['content'] + '\n\n' %}"
+        "{% else %}"
+        "{% set first_user_prefix = messages[0]['content'][0]['text'] + '\n\n' %}"
+        "{% endif %}"
+        "{% else %}"
+        "{% set loop_messages = messages %}"
+        "{% set first_user_prefix = '' %}"
+        "{% endif %}"
+
+        "{% for message in loop_messages %}"
+        "{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}"
+        "{{ raise_exception(\"Conversation roles must alternate user/assistant/user/assistant/...\") }}"
+        "{% endif %}"
+
+        "{% if message['role'] == 'assistant' %}"
+        "{% set role = 'model' %}"
+        "{% else %}"
+        "{% set role = message['role'] %}"
+        "{% endif %}"
+
+        "{{ '<start_of_turn>' + role + '\n' + (first_user_prefix if loop.first else '') }}"
+
+        "{% if message['content'] is string %}"
+        "{{ message['content'] | trim }}"
+        "{% elif message['content'] is iterable %}"
+        "{% for item in message['content'] %}"
+        "{% if item['type'] == 'image_url' and item['image_url'] is string %}"
+        "{{ '<start_of_image>' + item['image_url'] + '<end_of_image>' }}"
+        "{% elif item['type'] == 'image_url' and item['image_url'] is mapping %}"
+        "{{ '<start_of_image>' + item['image_url']['url'] + '<end_of_image>' }}"
+        "{% elif item['type'] == 'text' %}"
+        "{{ item['text'] | trim }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% else %}"
+        "{{ raise_exception('Invalid content type') }}"
+        "{% endif %}"
+
+        "<end_of_turn>\n"
+        "{% endfor %}"
+
+        "{% if add_generation_prompt %}"
+        "<start_of_turn>model\n"
+        "{% endif %}"
+    )
+
+
+class GLM41VChatHandler(MTMDChatHandler):
+    # Note: Make sure the GGUF files of your converted model and mmproj are F16 or F32.
+
+    GLM41V_EOS_TOKEN = "<|endoftext|>"
+    GLM41V_PAD_TOKEN = "<|endoftext|>"
+    GLM41V_IMAGE_START_TOKEN = "<|begin_of_image|>"
+    GLM41V_IMAGE_END_TOKEN = "<|end_of_image|>"
+
+    CHAT_FORMAT = (
+        "[gMASK]<sop>\n"
+        "{%- for msg in messages -%}"
+            "{%- if msg.role == 'system' -%}"
+                "<|system|>\n{{ msg.content }}{{ GLM41V_EOS_TOKEN }}"
+            "{%- elif msg.role == 'user' -%}"
+                "<|user|>\n"
+                "{%- if msg.content is string -%}"
+                    "{{ msg.content }}"
+                "{%- else -%}"
+                    "{%- for item in msg.content -%}"
+                        "{%- if item.type == 'image_url' or 'image_url' in item -%}"
+                            "<|begin_of_image|>"
+                            "{%- if item.image_url is string -%}"
+                                "{{- item.image_url -}}"
+                            "{%- else -%}"
+                                "{{- item.image_url.url -}}"
+                            "{%- endif -%}"
+                            "<|end_of_image|>"
+                        "{%- elif item.type == 'text' -%}"
+                            "{{ item.text }}"
+                        "{%- endif -%}"
+                    "{%- endfor -%}"
+                "{%- endif -%}{{ GLM41V_EOS_TOKEN }}"
+            "{%- elif msg.role == 'assistant' -%}"
+                "{%- if msg.metadata -%}"
+                    "<|assistant|>{{ msg.metadata }}\n{{ msg.content }}{{ GLM41V_EOS_TOKEN }}"
+                "{%- else -%}"
+                    "<|assistant|>\n{{ msg.content }}{{ GLM41V_EOS_TOKEN }}"
+                "{%- endif -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{%- if add_generation_prompt -%}"
+            "<|assistant|>\n"
+        "{%- endif -%}"
+    )
+
+    def __call__(self, **kwargs):
+        self.extra_template_arguments["GLM41V_EOS_TOKEN"] = self.GLM41V_EOS_TOKEN
+        # https://huggingface.co/zai-org/GLM-4.1V-9B-Thinking/blob/main/generation_config.json
+        stop_tokens = [self.GLM41V_EOS_TOKEN, "<|user|>", "<|observation|>", "</answer>"] # Stop token patch
+        kwargs['stop'] = stop_tokens
+
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix} - Start processing")
+
+        # Use parent implementation
+        return super().__call__(**kwargs)
+
+
+class GLM46VChatHandler(MTMDChatHandler):
+    GLM46V_EOS_TOKEN = "<|endoftext|>"
+    GLM46V_PAD_TOKEN = "<|endoftext|>"
+    GLM46V_IMAGE_START_TOKEN = "<|begin_of_image|>"
+    GLM46V_IMAGE_END_TOKEN = "<|end_of_image|>"
+
+    CHAT_FORMAT = (
+        "[gMASK]<sop>"
+        "{%- if tools -%}"
+            "<|system|>\n# Tools\n\nYou may call one or more functions to assist with the user query.\n"
+            "You are provided with function signatures within <tools></tools> XML tags:\n<tools>\n"
+            "{%- for tool in tools -%}"
+                "{{ tool | tojson(ensure_ascii=False) }}\n"
+            "{%- endfor -%}"
+            "</tools>\n\nFor each function call, output the function name and arguments within the following XML format:\n"
+            "<tool_call>{function-name}\n<arg_key>{arg-key-1}</arg_key>\n<arg_value>{arg-value-1}</arg_value>\n...\n</tool_call>"
+        "{%- endif -%}"
+
+        "{%- for m in messages -%}"
+            "{%- if m.role == 'system' -%}"
+                "<|system|>\n{{ m.content }}"
+            "{%- elif m.role == 'user' -%}"
+                "<|user|>\n"
+                "{%- if m.content is string -%}"
+                    "{{ m.content }}"
+                "{%- else -%}"
+                    "{%- for item in m.content -%}"
+                        "{%- if item.type == 'image_url' or 'image_url' in item -%}"
+                            "<|begin_of_image|>"
+                            "{%- if item.image_url is string -%}"
+                                "{{- item.image_url -}}"
+                            "{%- else -%}"
+                                "{{- item.image_url.url -}}"
+                            "{%- endif -%}"
+                            "<|end_of_image|>"
+                        "{%- elif item.type == 'text' -%}"
+                            "{{ item.text }}"
+                        "{%- endif -%}"
+                    "{%- endfor -%}"
+                "{%- endif -%}"
+                # If enable_thinking is disabled, insert `/nothink` according to the source code logic.
+                "{{ '/nothink' if not enable_thinking else '' }}"
+            "{%- elif m.role == 'assistant' -%}"
+                "<|assistant|>"
+                "{%- if enable_thinking -%}"
+                    "{%- set reasoning = m.reasoning_content if m.reasoning_content is string else '' -%}"
+                    "\n<think>{{ reasoning.strip() }}</think>"
+                "{%- else -%}"
+                    "\n<think></think>"
+                "{%- endif -%}"
+                "{{ '\n' + m.content.strip() if m.content.strip() else '' }}"
+            "{%- endif -%}"
+            "{{ GLM46V_EOS_TOKEN }}"
+        "{%- endfor -%}"
+
+        "{%- if add_generation_prompt -%}"
+            "<|assistant|>\n"
+            "{{ '<think>' if enable_thinking else '<think></think>\n' }}"
+        "{%- endif -%}"
+    )
+
+    def __init__(self, enable_thinking: bool = True, **kwargs):
+        """
+        GLM-4.6V Handler
+        Parameters:
+        - enable_thinking (bool): Whether to enable the model's think process. The default is True.
+        """
+        self.enable_thinking = enable_thinking
+        super().__init__(**kwargs)
+
+    def __call__(self, **kwargs):
+        self.extra_template_arguments["enable_thinking"] = self.enable_thinking
+        self.extra_template_arguments["GLM46V_EOS_TOKEN"] = self.GLM46V_EOS_TOKEN
+
+        # https://huggingface.co/zai-org/GLM-4.6V-Flash/blob/main/generation_config.json
+        kwargs['stop'] = [self.GLM46V_EOS_TOKEN, "<|user|>", "<|observation|>", "<|code_middle|>"] # Stop token patch
+
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix}(enable_thinking={self.enable_thinking}) - Start processing")
+
+        return super().__call__(**kwargs)
+
+
+class GraniteDoclingChatHandler(MTMDChatHandler):
+    """
+    Handler for Granite-Docling models.
+
+    Format(512x512): <loc_xmin><loc_ymin><loc_xmax><loc_ymax>Content
+
+    Note(JamePeng): The GGUF files for Model and MMPROJ should be BF16 version !!!
+                    Since the model does not have special tokens for the start and end of an image,
+                    it is recommended to process only one image at a time.
+                    You can iterate through the images individually for recognition.
+
+    """
+    GRANITE_BOS_TOKEN = "<|start_of_role|>"
+    GRANITE_EOS_TOKEN = "<|end_of_text|>"
+    GRANITE_PAD_TOKEN = "<|end_of_text|>"
+    GRANITE_IMAGE_TOKEN = "<image>"
+
+    CHAT_FORMAT = (
+        "{%- for message in messages -%}"
+            "{{- '<|start_of_role|>' + message['role'] + '<|end_of_role|>' -}}"
+            "{%- if message['content'] is string -%}"
+                "{{- message['content'] -}}"
+            "{%- else -%}"
+                "{%- for part in message['content'] -%}"
+                    "{%- if part['type'] == 'text' -%}"
+                        "{{- part['text'] -}}"
+                    "{%- elif part['type'] == 'image_url' -%}"
+                        "{%- if part.image_url is string -%}"
+                            "{{- part.image_url -}}"
+                        "{%- else -%}"
+                            "{{- part.image_url.url -}}"
+                        "{%- endif -%}"
+                    "{%- endif -%}"
+                "{%- endfor -%}"
+            "{%- endif -%}"
+            "{{- '<|end_of_text|>\n' -}}"
+        "{%- endfor -%}"
+        "{%- if add_generation_prompt -%}"
+            "{{- '<|start_of_role|>assistant' -}}"
+            # Support the 'controls' parameter if present in generation arguments
+            "{%- if controls -%}{{- ' ' + controls | tojson() -}}{%- endif -%}"
+            "{{- '<|end_of_role|>' -}}"
+        "{%- endif -%}"
+    )
+
+    def __init__(self, controls: dict = None, **kwargs):
+        """
+        Granite-Docling Handler
+        Args:
+            controls (dict, optional): Operational parameters passed to the assistant role.
+
+            The 'controls' parameter is used to guide the model's behavior or output format.
+            Common examples for 'controls' include:
+             - Document Parsing: {"mode": "document_parsing", "format": "json"}
+        """
+        self.controls = controls
+        super().__init__(**kwargs)
+
+    def __call__(self, **kwargs):
+        # Inject controls into the template environment
+        self.extra_template_arguments["controls"] = self.controls
+        self.DEFAULT_SYSTEM_MESSAGE = None
+        kwargs['stop'] = [self.GRANITE_EOS_TOKEN]
+
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix} - Start processing")
+
+
+        return super().__call__(**kwargs)
+
+
+class LFM2VLChatHandler(MTMDChatHandler):
+    LFM2VL_BOS_TOKEN = "<|startoftext|>"
+    LFM2VL_EOS_TOKEN = "<|im_end|>"
+    LFM2VL_IMAGE_START_TOKEN = "<|image_start|>"
+    LFM2VL_IMAGE_END_TOKEN = "<|image_end|>"
+
+    CHAT_FORMAT = (
+        "{%- for message in messages -%}"
+            "{{ '<|im_start|>' + message['role'] + '\n' }}"
+            "{%- if message['content'] is string -%}"
+                "{{ message['content'] }}"
+            "{%- else -%}"
+                "{%- for content in message['content'] -%}"
+                    "{%- if 'image_url' in content -%}"
+                        "{%- if content.image_url is string -%}"
+                            "<|image_start|>{{ content.image_url }}<|image_end|>"
+                        "{%- else -%}"
+                            "<|image_start|>{{ content.image_url.url }}<|image_end|>"
+                        "{%- endif -%}"
+                    "{%- elif content['type'] == 'text' -%}"
+                        "{{ content['text'] }}"
+                    "{%- endif -%}"
+                "{%- endfor -%}"
+            "{%- endif -%}"
+            "{{ '<|im_end|>\n' }}"
+        "{%- endfor -%}"
+        "{%- if add_generation_prompt -%}"
+            "{{ '<|im_start|>assistant\n' }}"
+        "{%- endif -%}"
+    )
+
+    def __init__(self, image_min_tokens: int = -1, image_max_tokens: int = -1, **kwargs):
+        """
+        LFM2-VL Handler
+        LiquidAI officially recommends configuring LFM2-VL with the following Vision parameters: min_image_tokens=64, max_image_tokens=256
+        """
+        self.image_min_tokens = image_min_tokens
+        self.image_max_tokens = image_max_tokens
+        super().__init__(image_min_tokens=self.image_min_tokens, image_max_tokens=self.image_max_tokens, **kwargs)
+
+    def __call__(self, **kwargs):
+
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix} - Start processing")
+
+        return super().__call__(**kwargs)
+
+
+class PaddleOCRChatHandler(MTMDChatHandler):
+    """
+    Handler for PaddleOCR 1.5 multimodal models.
+    """
+
+    PADDLEOCR_CLS_TOKEN = "<|begin_of_sentence|>"
+    PADDLEOCR_BOS_TOKEN = "<s>"
+    PADDLEOCR_EOS_TOKEN = "</s>"
+    PADDLEOCR_SEP_TOKEN = "<|end_of_sentence|>"
+    PADDLEOCR_IMAGE_BOS_TOKEN = "<|IMAGE_START|>"
+    PADDLEOCR_IMAGE_EOS_TOKEN = "<|IMAGE_END|>"
+
+    CHAT_FORMAT = (
+        "{%- if not add_generation_prompt is defined -%}{%- set add_generation_prompt = true -%}{%- endif -%}"
+        "{%- if not cls_token is defined -%}{%- set cls_token = '" + PADDLEOCR_CLS_TOKEN + "' -%}{%- endif -%}"
+        "{%- if not eos_token is defined -%}{%- set eos_token = '" + PADDLEOCR_EOS_TOKEN + "' -%}{%- endif -%}"
+
+        "{{- cls_token -}}"
+        "{%- for message in messages -%}"
+            "{%- if message['role'] == 'user' -%}"
+                "{{- 'User: ' -}}"
+
+                # Robust parsing: Check if content is string or list
+                "{%- if message['content'] is string -%}"
+                    "{{- message['content'] -}}"
+                "{%- else -%}"
+                    # Pass 1: Render all images first
+                    "{%- for content in message['content'] -%}"
+                        "{%- if content['type'] == 'image_url' and 'image_url' in content -%}"
+                            "{{- '<|IMAGE_START|>' -}}"
+                                "{%- if content.image_url is string -%}"
+                                    "{{- content.image_url -}}"
+                                "{%- else -%}"
+                                    "{{- content.image_url.url -}}"
+                                "{%- endif -%}"
+                            "{{- '<|IMAGE_END|>' -}}"
+                        "{%- endif -%}"
+                    "{%- endfor -%}"
+
+                    # Pass 2: Render all text second
+                    "{%- for content in message['content'] -%}"
+                        "{%- if content['type'] == 'text' -%}"
+                            "{{- content['text'] -}}"
+                        "{%- endif -%}"
+                    "{%- endfor -%}"
+                "{%- endif -%}"
+                "{{- '\\n' -}}"
+
+            "{%- elif message['role'] == 'assistant' -%}"
+                "{{- 'Assistant:\\n' -}}"
+                "{%- if message['content'] is string -%}"
+                    "{{- message['content'] -}}"
+                "{%- else -%}"
+                    "{%- for content in message['content'] -%}"
+                        "{%- if content['type'] == 'text' -%}"
+                            "{{- content['text'] -}}"
+                        "{%- endif -%}"
+                    "{%- endfor -%}"
+                "{%- endif -%}"
+                "{{- eos_token -}}"
+
+            "{%- elif message['role'] == 'system' -%}"
+                "{%- if message['content'] is string -%}"
+                    "{{- message['content'] + '\\n' -}}"
+                "{%- else -%}"
+                    "{%- for content in message['content'] -%}"
+                        "{%- if content['type'] == 'text' -%}"
+                            "{{- content['text'] + '\\n' -}}"
+                        "{%- endif -%}"
+                    "{%- endfor -%}"
+                "{%- endif -%}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+
+        "{%- if add_generation_prompt -%}"
+            "{{- 'Assistant:\\n' -}}"
+        "{%- endif -%}"
+    )
+
+    def __init__(
+        self,
+        image_min_tokens: int = -1,
+        image_max_tokens: int = -1,
+        **kwargs
+    ):
+        self.image_min_tokens = image_min_tokens
+        self.image_max_tokens = image_max_tokens
+        super().__init__(
+            image_min_tokens=self.image_min_tokens,
+            image_max_tokens=self.image_max_tokens,
+            **kwargs
+        )
+
+    def __call__(self, **kwargs):
+        # Set the specific stop token defined in the PaddleOCR template
+        kwargs['stop'] = [self.PADDLEOCR_EOS_TOKEN]
+
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix} - Start processing")
+
+        return super().__call__(**kwargs)
+
+
+class Qwen25VLChatHandler(MTMDChatHandler):
+    CHAT_FORMAT = (
+        "{% set image_count = namespace(value=0) %}"
+        "{% for message in messages %}"
+        "{% if loop.first and message['role'] != 'system' %}"
+        "<|im_start|>system\n"
+        "{{ self.DEFAULT_SYSTEM_MESSAGE }}<|im_end|>\n"
+        "{% endif %}"
+        "<|im_start|>{{ message['role'] }}\n"
+        "{% if message['content'] is string %}"
+        "{{ message['content'] }}<|im_end|>\n"
+        "{% else %}"
+        "{% for content in message['content'] %}"
+        "{% if content['type'] == 'image_url' %}"
+        "{% if content.image_url is string %}"
+        "{% set image_count.value = image_count.value + 1 %}"
+        "Picture {{ image_count.value }}: <|vision_start|> {{ content.image_url }} <|vision_end|>"
+        "{% else %}"
+        "{% set image_count.value = image_count.value + 1 %}"
+        "Picture {{ image_count.value }}: <|vision_start|> {{ content.image_url.url }} <|vision_end|>"
+        "{% endif %}"
+        "{% elif content['type'] == 'text' %}"
+        "{{ content['text'] }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "<|im_end|>\n"
+        "{% endif %}"
+        "{% endfor %}"
+        "<|im_start|>assistant\n"
+    )
+
+    def __call__(self, **kwargs):
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix} - Start processing")
+
+        # Use parent implementation
+        return super().__call__(**kwargs)
+
+
+class Qwen3VLChatHandler(MTMDChatHandler):
+    CHAT_FORMAT = (
+        "{{- '<|im_start|>system\n' -}}"
+        "{%- if messages[0].content is string and messages[0].role == 'system' -%}"
+            "{{- messages[0].content -}}"
+        "{%- elif messages[0].role == 'system' -%}"
+            "{%- if 'text' in messages[0].content -%}"
+                "{{- messages[0].content.text -}}"
+            "{%- else -%}"
+                "{{- 'You are a helpful assistant.' -}}"
+            "{%- endif -%}"
+        "{%- endif -%}"
+        "{%- if tools -%}"
+            "{{- '\n\n' -}}"
+            "{{- '# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>' -}}"
+            "{%- for tool in tools -%}"
+                "{{- '\n' -}}"
+                "{{- tool | tojson -}}"
+            "{%- endfor -%}"
+            "{{- '\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <arguments-json-object>}\n</tool_call>\n\nYou can also return a response for the user alongside a function call:\nRESPONSE FOR THE USER HERE\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <arguments-json-object>}\n</tool_call>' -}}"
+        "{%- endif -%}"
+        "{{- '<|im_end|>\n' -}}"
+        "{%- set image_count = namespace(value=0) -%}"
+        #"{%- set video_count = namespace(value=0) -%}"
+        "{%- for message in messages -%}"
+            "{%- if message.role == 'tool' -%}"
+                "{{- '<|im_start|>user\n<tool_response>\n' -}}"
+            "{%- elif message.role != 'system' -%}"
+                "{{- '<|im_start|>' + message.role + '\n' -}}"
+            "{%- endif -%}"
+            "{%- if message.content is string and message.role != 'system' -%}"
+                "{{- message.content -}}"
+            "{%- elif message.role != 'system' -%}"
+                "{%- for content in message.content -%}"
+                    "{%- if 'image_url' in content -%}"
+                        "{%- set image_count.value = image_count.value + 1 -%}"
+                        "{%- if add_vision_id -%}"
+                            "{{- 'Picture ' -}}"
+                            "{{- image_count.value | string -}}"
+                            "{{- ': ' -}}"
+                        "{%- endif -%}"
+                        "{{- '<|vision_start|>' -}}"
+                        "{%- if content.image_url is string -%}"
+                            "{{- content.image_url -}}"
+                        "{%- else -%}"
+                            "{{- content.image_url.url -}}"
+                        "{%- endif -%}"
+                        "{{- '<|vision_end|>' -}}"
+                    "{%- endif -%}"
+                    # Video not supported yet
+                    "{%- if 'text' in content -%}"
+                        "{{- content.text -}}"
+                    "{%- endif -%}"
+                "{%- endfor -%}"
+            "{%- endif -%}"
+            "{%- if message.role == 'assistant' -%}"
+                "{%- if message.tool_calls -%}"
+                    "{%- for tool_call in message.tool_calls -%}"
+                        "{%- if (loop.first and message.content) or (not loop.first) -%}"
+                            "{{- '\n' -}}"
+                        "{%- endif -%}"
+                        "{%- if tool_call.function -%}"
+                            "{%- set tool_call = tool_call.function -%}"
+                        "{%- endif -%}"
+                        "{{- '<tool_call>\n{\"name\": \"' + tool_call.name + '\", \"arguments\": ' -}}"
+                        "{%- if tool_call.arguments is string -%}"
+                            "{{- tool_call.arguments -}}"
+                        "{%- else -%}"
+                            "{{- tool_call.arguments | tojson -}}"
+                        "{%- endif -%}"
+                        "{{- '}\n</tool_call>' -}}"
+                    "{%- endfor -%}"
+                "{%- endif -%}"
+            "{%- elif message.role == 'tool' -%}"
+                "{{- '</tool_response>' -}}"
+            "{%- endif -%}"
+            "{%- if message.role != 'system' -%}"
+                "{{- '<|im_end|>\n' -}}"
+            "{%- endif -%}"
+        "{%- endfor -%}"
+        "{%- if add_generation_prompt -%}"
+            "{{- '<|im_start|>assistant\n' -}}"
+            "{%- if force_reasoning -%}"
+                "{{- '<think>\n' -}}"
+            "{%- endif -%}"
+        "{%- endif -%}"
+    )
+
+    def __init__(
+        self,
+        force_reasoning: bool = False,
+        add_vision_id: bool = True,
+        **kwargs,
+    ):
+        """
+        Parameters:
+        - force_reasoning (bool):
+            - True: Force the reasoning in the model by adding <think> to the chat template.
+            - False (default): Don't force the reasoning.
+        - add_vision_id (bool):
+            - True (default): Count all the images. Recommended for multi-image.
+            - False: Doesn't count the images. Can save tokens with single-image.
+        """
+        super().__init__(**kwargs)
+        self.force_reasoning = force_reasoning
+        self.extra_template_arguments["force_reasoning"] = force_reasoning
+        self.extra_template_arguments["add_vision_id"] = add_vision_id
+
+    def __call__(self, **kwargs):
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix}(force_reasoning={self.force_reasoning}) - Start processing")
+
+        # Use parent implementation
+        return super().__call__(**kwargs)
+
+class Qwen35ChatHandler(MTMDChatHandler):
+    CHAT_FORMAT = (
+        "{%- set image_count = namespace(value=0) -%}"
+        "{%- set video_count = namespace(value=0) -%}"
+        "{%- macro render_content(content, do_vision_count, is_system_content=false) -%}"
+        "    {%- if content is string -%}"
+        "        {{- content -}}"
+        "    {%- elif content is iterable and content is not mapping -%}"
+        "        {%- for item in content -%}"
+        "            {%- if 'image_url' in item or item.type == 'image_url' -%}"
+        "                {%- if is_system_content -%}"
+        "                    {{- raise_exception('System message cannot contain images.') -}}"
+        "                {%- endif -%}"
+        "                {%- if do_vision_count -%}"
+        "                    {%- set image_count.value = image_count.value + 1 -%}"
+        "                {%- endif -%}"
+        "                {%- if add_vision_id -%}"
+        "                    {{- 'Picture ' -}}"
+        "                    {{- image_count.value | string -}}"
+        "                    {{- ': ' -}}"
+        "                {%- endif -%}"
+        "                {{- '<|vision_start|>' -}}"
+        "                {%- if item.image_url is string -%}"
+        "                    {{- item.image_url -}}"
+        "                {%- else -%}"
+        "                    {{- item.image_url.url -}}"
+        "                {%- endif -%}"
+        "                {{- '<|vision_end|>' -}}"
+        "            {%- elif 'video' in item -%}"
+        "                {{- raise_exception('llama.cpp does not currently support video.') -}}"  # Video not supported, raise exception
+        "                {%- if is_system_content -%}"
+        "                    {{- raise_exception('System message cannot contain videos.') -}}"
+        "                {%- endif -%}"
+        "                {%- if do_vision_count -%}"
+        "                    {%- set video_count.value = video_count.value + 1 -%}"
+        "                {%- endif -%}"
+        "                {%- if add_vision_id -%}"
+        "                    {{- 'Video ' ~ video_count.value ~ ': ' -}}"
+        "                {%- endif -%}"
+        "                {{- '<|vision_start|>' -}}"
+        "                {{- item.video -}}"
+        "                {{- '<|vision_end|>' -}}"
+        "            {%- elif 'text' in item -%}"
+        "                {{- item.text -}}"
+        "            {%- else -%}"
+        "                {{- raise_exception('Unexpected item type in content.') -}}"
+        "            {%- endif -%}"
+        "        {%- endfor -%}"
+        "    {%- elif content is none or content is undefined -%}"
+        "        {{- '' -}}"
+        "    {%- else -%}"
+        "        {{- raise_exception('Unexpected content type.') -}}"
+        "    {%- endif -%}"
+        "{%- endmacro -%}"
+        "{%- if not messages -%}"
+        "    {{- raise_exception('No messages provided.') -}}"
+        "{%- endif -%}"
+        "{%- if tools and tools is iterable and tools is not mapping -%}"
+        "    {{- '<|im_start|>system\n' -}}"
+        "    {{- '# Tools\n\nYou have access to the following functions:\n\n<tools>' -}}"
+        "    {%- for tool in tools -%}"
+        "        {{- '\n' -}}"
+        "        {{- tool | tojson -}}"
+        "    {%- endfor -%}"
+        "    {{- '\n</tools>' -}}"
+        "    {{- '\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>' -}}"
+        "    {%- if messages[0].role == 'system' -%}"
+        "        {%- set content = render_content(messages[0].content, false, true) | trim -%}"
+        "        {%- if content -%}"
+        "            {{- '\n\n' + content -}}"
+        "        {%- endif -%}"
+        "    {%- endif -%}"
+        "    {{- '<|im_end|>\n' -}}"
+        "{%- elif messages[0].role == 'system' -%}"
+        "    {%- set content = render_content(messages[0].content, false, true) -%}"
+        "    {{- '<|im_start|>system\n' + content + '<|im_end|>\n' -}}"
+        "{%- endif -%}"
+        "{%- set ns = namespace(multi_step_tool=true, last_query_index=messages | length - 1) -%}"
+        "{%- for message in messages[::-1] -%}"
+        "    {%- set index = messages | length - 1 - loop.index0 -%}"
+        "    {%- if ns.multi_step_tool and message.role == 'user' -%}"
+        "        {%- set content = render_content(message.content, false) | trim -%}"
+        "        {%- if not (content.startswith('<tool_response>') and content.endswith('</tool_response>')) -%}"
+        "            {%- set ns.multi_step_tool = false -%}"
+        "            {%- set ns.last_query_index = index -%}"
+        "        {%- endif -%}"
+        "    {%- endif -%}"
+        "{%- endfor -%}"
+        "{%- if ns.multi_step_tool -%}"
+        "    {{- raise_exception('No user query found in messages.') -}}"
+        "{%- endif -%}"
+        "{%- for message in messages -%}"
+        "    {%- set content = render_content(message.content, true) | trim -%}"
+        "    {%- if message.role == 'system' -%}"
+        "        {%- if not loop.first -%}"
+        "            {{- raise_exception('System message must be at the beginning.') -}}"
+        "        {%- endif -%}"
+        "    {%- elif message.role == 'user' -%}"
+        "        {{- '<|im_start|>' + message.role + '\n' + content + '<|im_end|>\n' -}}"
+        "    {%- elif message.role == 'assistant' -%}"
+        "        {%- set reasoning_content = '' -%}"
+        "        {%- if message.reasoning_content is string -%}"
+        "            {%- set reasoning_content = message.reasoning_content -%}"
+        "        {%- elif '</think>' in content -%}"
+        "            {%- set reasoning_content = content.split('</think>')[0].rstrip('\n').split('<think>')[-1].lstrip('\n') -%}"
+        "            {%- set content = content.split('</think>')[-1].lstrip('\n') -%}"
+        "        {%- endif -%}"
+        "        {%- set reasoning_content = reasoning_content | trim -%}"
+        "        {%- if loop.index0 > ns.last_query_index -%}"
+        "            {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content + '\n</think>\n\n' + content -}}"
+        "        {%- else -%}"
+        "            {{- '<|im_start|>' + message.role + '\n' + content -}}"
+        "        {%- endif -%}"
+        "        {%- if message.tool_calls and message.tool_calls is iterable and message.tool_calls is not mapping -%}"
+        "            {%- for tool_call in message.tool_call -%}"
+        "                {%- if tool_call.function is defined -%}"
+        "                    {%- set tool_call = tool_call.function -%}"
+        "                {%- endif -%}"
+        "                {%- if loop.first -%}"
+        "                    {%- if content | trim -%}"
+        "                        {{- '\n\n<tool_call>\n<function=' + tool_call.name + '>\n' -}}"
+        "                    {%- else -%}"
+        "                        {{- '<tool_call>\n<function=' + tool_call.name + '>\n' -}}"
+        "                    {%- endif -%}"
+        "                {%- else -%}"
+        "                    {{- '\n<tool_call>\n<function=' + tool_call.name + '>\n' -}}"
+        "                {%- endif -%}"
+        "                {%- if tool_call.arguments is defined -%}"
+        "                    {%- for (args_name, args_value) in tool_calls.arguments | items -%}"
+        "                        {{- '<parameter=' + args.name + '>\n' -}}"
+        "                        {%- set args_value = args_value | tojson | safe if args_value is mapping or args_value is sequence and args_value is not string else args_value | string -%}"
+        "                        {{- args_value -}}"
+        "                        {{- '\n</parameter>' -}}"
+        "                    {%- endfor -%}"
+        "                {%- endif -%}"
+        "                {{- '</function>\n</tool_call>' -}}"
+        "            {%- endfor -%}"
+        "        {%- endif -%}"
+        "        {{- '<|im_end|>\n' -}}"
+        "    {%- elif message.role == 'tool' -%}"
+        "        {%- if loop.previtem and loop.previtem.role != 'tool' -%}"
+        "            {{- '<|im_start|>user' -}}"
+        "        {%- endif -%}"
+        "        {{- '\n<tool_response>\n' -}}"
+        "        {{- content -}}"
+        "        {{- '\n</tool_response>' -}}"
+        "        {%- if not loop.last and loop.nextitem.role != 'tool' -%}"
+        "            {{- '<|im_end|>\n' -}}"
+        "        {%- elif loop.last -%}"
+        "            {{- '<|im_end|>\n' -}}"
+        "        {%- endif -%}"
+        "    {%- else -%}"
+        "        {{- raise_exception('Unexpected message role.') -}}"
+        "    {%- endif -%}"
+        "{%- endfor -%}"
+        "{%- if add_generation_prompt -%}"
+        "    {{- '<|im_start|>assistant\n' -}}"
+        "    {%- if enable_thinking is false -%}"
+        "        {{- '<think>\n\n</think>\n\n' -}}"
+        "    {%- else -%}"
+        "        {{- '<think>\n' -}}"
+        "    {%- endif -%}"
+        "{%- endif -%}"
+    )
+
+    def __init__(
+        self,
+        enable_thinking: bool = True,
+        add_vision_id: bool = True,
+        **kwargs,
+    ):
+        """
+        Parameters:
+        - enable_thinking (bool):
+            - True (default): Enables reasoning for better results.
+            - False: Disables reasoning for faster results.
+        - add_vision_id (bool):
+            - True (default): Count all the images. Recommended for multi-image.
+            - False: Doesn't count the images. Can save tokens with single-image.
+        """
+        super().__init__(**kwargs)
+        self.enable_thinking = enable_thinking
+        self.extra_template_arguments["enable_thinking"] = enable_thinking
+        self.extra_template_arguments["add_vision_id"] = add_vision_id
+
+    def __call__(self, **kwargs):
+        llama = kwargs['llama']
+
+        if hasattr(llama, 'input_ids'):
+            llama.input_ids.fill(0)
+
+        if self.verbose:
+            print(f"{self.log_prefix}(enable_thinking={self.enable_thinking}) - Start processing")
+
+        # Use parent implementation
+        return super().__call__(**kwargs)
+
+@register_chat_completion_handler("chatml-function-calling")
+def chatml_function_calling(
+    llama: llama.Llama,
+    messages: List[llama_types.ChatCompletionRequestMessage],
+    functions: Optional[List[llama_types.ChatCompletionFunction]] = None,
+    function_call: Optional[llama_types.ChatCompletionRequestFunctionCall] = None,
+    tools: Optional[List[llama_types.ChatCompletionTool]] = None,
+    tool_choice: Optional[llama_types.ChatCompletionToolChoiceOption] = None,
+    temperature: float = 0.2,
+    top_p: float = 0.95,
+    top_k: int = 40,
+    min_p: float = 0.05,
+    typical_p: float = 1.0,
+    stream: bool = False,
+    stop: Optional[Union[str, List[str]]] = [],
+    response_format: Optional[llama_types.ChatCompletionRequestResponseFormat] = None,
+    max_tokens: Optional[int] = None,
+    present_penalty: float = 0.0,
+    frequency_penalty: float = 0.0,
+    repeat_penalty: float = 1.1,
+    top_n_sigma: float = -1.00,
+    mirostat_mode: int = 0,
+    mirostat_tau: float = 5.0,
+    mirostat_eta: float = 0.1,
+    xtc_threshold: float = 0.1,
+    xtc_probability: float = 0.0,
+    dry_multiplier: float = 0.0,
+    dry_base: float = 1.75,
+    dry_allowed_length: int = 2,
+    dry_penalty_last_n:int = 0,
+    dry_seq_breakers: list[str] = ["\n", ":", "\"", "*"],
+    adaptive_target : float = -1.0,
+    adaptive_decay : float = 0.9,
+    use_infill: bool = False,
+    model: Optional[str] = None,
+    logits_processor: Optional[llama.LogitsProcessorList] = None,
+    grammar: Optional[llama.LlamaGrammar] = None,
+    logprobs: Optional[bool] = None,
+    top_logprobs: Optional[int] = None,
+    **kwargs,  # type: ignore
+) -> Union[
+    llama_types.CreateChatCompletionResponse,
+    Iterator[llama_types.CreateChatCompletionStreamResponse],
+]:
+    function_calling_template = (
+        "{% for message in messages %}"
+        "<|im_start|>{{ message.role }}\n"
+        # System message
+        "{% if message.role == 'system' %}"
+        "{{ message.content }}"
+        "{% if tool_calls %}"
+        "\n\nYou have access to the following functions:\n"
+        "{% for tool in tools %}"
+        "\nfunctions.{{ tool.function.name }}:\n"
+        "{{ tool.function.parameters | tojson }}"
+        "\n{% endfor %}"
+        "\n\nYou can respond to users messages with either a single message or one or more function calls."
+        "\n\nTo respond with a message begin the message with 'message:', use the following format:"
+        "\n\nmessage:"
+        "\n<message>"
+        "\n\nTo respond with one or more function calls begin the message with 'functions.<function_name>:', use the following format:"
+        "\n\nfunctions.<function_name>:"
+        '\n{ "arg1": "value1", "arg2": "value2" }'
+        "\nfunctions.<function_name>:"
+        '\n{ "arg1": "value1", "arg2": "value2" }'
+        "{% endif %}"
+        "<|im_end|>\n"
+        "{% endif %}"
+        # User message
+        "{% if message.role == 'user' %}"
+        "{{ message.content }}"
+        "<|im_end|>\n"
+        "{% endif %}"
+        # Assistant message
+        "{% if message.role == 'assistant' %}"
+        ## Reglar message
+        "{% if message.content and message.content | length > 0 %}"
+        "{% if tool_calls %}"
+        "message:\n"
+        "{% endif %}"
+        "{{ message.content }}"
+        "<|im_end|>\n"
+        "{% endif %}"
+        ## Function calls
+        "{% if 'tool_calls' in message %}"
+        "{% for tool_call in message.tool_calls %}"
+        "functions.{{ tool_call.function.name }}:\n"
+        "{{ tool_call.function.arguments }}"
+        "{% endfor %}"
+        "<|im_end|>\n"
+        "{% endif %}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
+    )
+    template_renderer = ImmutableSandboxedEnvironment(
+        autoescape=jinja2.select_autoescape(["html", "xml"]),
+        undefined=jinja2.StrictUndefined,
+    ).from_string(function_calling_template)
+
+    # Convert legacy functions to tools
+    if functions is not None:
+        tools = [
+            {
+                "type": "function",
+                "function": function,
+            }
+            for function in functions
+        ]
+
+    # Convert legacy function_call to tool_choice
+    if function_call is not None:
+        if isinstance(function_call, str) and (
+            function_call == "none" or function_call == "auto"
+        ):
+            tool_choice = function_call
+        if isinstance(function_call, dict) and "name" in function_call:
+            tool_choice = {
+                "type": "function",
+                "function": {
+                    "name": function_call["name"],
+                },
+            }
+
+    stop = (
+        [stop, "<|im_end|>"]
+        if isinstance(stop, str)
+        else stop + ["<|im_end|>"] if stop else ["<|im_end|>"]
+    )
+
+    # Case 1: No tool choice by user
+    if (
+        tool_choice is None
+        or (isinstance(tool_choice, str) and tool_choice == "none")
+        or tools is None
+        or len(tools) == 0
+    ):
+        prompt = template_renderer.render(
+            messages=messages,
+            tools=[],
+            tool_calls=None,
+            add_generation_prompt=True,
+        )
+
+        if response_format is not None and response_format["type"] == "json_object":
+            grammar = _grammar_for_response_format(response_format)
+
+        return _convert_completion_to_chat(
+            llama.create_completion(
+                prompt=prompt,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                typical_p=typical_p,
+                stream=stream,
+                stop=stop,
+                max_tokens=max_tokens,
+                present_penalty=present_penalty,
+                frequency_penalty=frequency_penalty,
+                repeat_penalty=repeat_penalty,
+                top_n_sigma=top_n_sigma,
+                mirostat_mode=mirostat_mode,
+                mirostat_tau=mirostat_tau,
+                mirostat_eta=mirostat_eta,
+                xtc_threshold=xtc_threshold,
+                xtc_probability=xtc_probability,
+                dry_multiplier=dry_multiplier,
+                dry_base=dry_base,
+                dry_allowed_length=dry_allowed_length,
+                dry_penalty_last_n=dry_penalty_last_n,
+                dry_seq_breakers=dry_seq_breakers,
+                adaptive_target=adaptive_target,
+                adaptive_decay=adaptive_decay,
+                use_infill=use_infill,
+                model=model,
+                logits_processor=logits_processor,
+                grammar=grammar,
+                logprobs=top_logprobs if logprobs else None,
+            ),
+            stream=stream,
+        )
+
+    # Case 2: Tool choice by user
+    if isinstance(tool_choice, dict):
+        tool_name = tool_choice["function"]["name"]
+        tool = next(
+            (tool for tool in tools if tool["function"]["name"] == tool_name), None
+        )
+        if tool is None:
+            raise ValueError(f"Tool with name '{tool_name}' not found in tools")
+        prompt = template_renderer.render(
+            messages=messages,
+            tools=tools,
+            tool_calls=True,
+            add_generation_prompt=True,
+        )
+        prompt += f"functions.{tool_name}:\n"
+        try:
+            grammar = llama_grammar.LlamaGrammar.from_json_schema(
+                json.dumps(tool["function"]["parameters"]), verbose=llama.verbose
+            )
+        except Exception as e:
+            grammar = llama_grammar.LlamaGrammar.from_string(
+                llama_grammar.JSON_GBNF, verbose=llama.verbose
+            )
+            if llama.verbose:
+                print(
+                    "Failed to parse function body as JSON schema, falling back to default grammar"
+                )
+                print(e)
+        completion_or_chunks = llama.create_completion(
+            prompt=prompt,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            typical_p=typical_p,
+            stream=stream,
+            stop=stop,
+            max_tokens=max_tokens,
+            present_penalty=present_penalty,
+            frequency_penalty=frequency_penalty,
+            repeat_penalty=repeat_penalty,
+            top_n_sigma=top_n_sigma,
+            mirostat_mode=mirostat_mode,
+            mirostat_tau=mirostat_tau,
+            mirostat_eta=mirostat_eta,
+            xtc_threshold=xtc_threshold,
+            xtc_probability=xtc_probability,
+            dry_multiplier=dry_multiplier,
+            dry_base=dry_base,
+            dry_allowed_length=dry_allowed_length,
+            dry_penalty_last_n=dry_penalty_last_n,
+            dry_seq_breakers=dry_seq_breakers,
+            adaptive_target=adaptive_target,
+            adaptive_decay=adaptive_decay,
+            use_infill=use_infill,
+            model=model,
+            logits_processor=logits_processor,
+            grammar=grammar,
+        )
+        return _convert_completion_to_chat_function(
+            tool_name, completion_or_chunks, stream
+        )
+
+    # Case 3: Automatic tool choice
+    assert isinstance(tool_choice, str) and tool_choice == "auto"
+    function_names = " | ".join(
+        [f'''"functions.{tool['function']['name']}:"''' for tool in tools]
+    )
+    initial_gbnf_tool_grammar = (
+        """root   ::= functions | "message:"\n"""
+        f"""functions ::= {function_names}\n"""
+    )
+    follow_up_gbnf_tool_grammar = (
+        """root   ::= functions | "<|im_end|>"\n"""
+        f"""functions ::= {function_names}\n"""
+    )
+    prompt = template_renderer.render(
+        messages=messages,
+        tools=tools,
+        tool_calls=True,
+        add_generation_prompt=True,
+    )
+    completion_or_chunks = llama.create_completion(
+        prompt=prompt,
+        temperature=0,
+        top_p=top_p,
+        top_k=top_k,
+        min_p=min_p,
+        typical_p=typical_p,
+        stream=False,
+        stop=[":"],
+        max_tokens=None,
+        present_penalty=present_penalty,
+        frequency_penalty=frequency_penalty,
+        repeat_penalty=repeat_penalty,
+        top_n_sigma=top_n_sigma,
+        mirostat_mode=mirostat_mode,
+        mirostat_tau=mirostat_tau,
+        mirostat_eta=mirostat_eta,
+        xtc_threshold=xtc_threshold,
+        xtc_probability=xtc_probability,
+        dry_multiplier=dry_multiplier,
+        dry_base=dry_base,
+        dry_allowed_length=dry_allowed_length,
+        dry_penalty_last_n=dry_penalty_last_n,
+        dry_seq_breakers=dry_seq_breakers,
+        adaptive_target=adaptive_target,
+        adaptive_decay=adaptive_decay,
+        use_infill=use_infill,
+        model=model,
+        logits_processor=logits_processor,
+        grammar=llama_grammar.LlamaGrammar.from_string(
+            initial_gbnf_tool_grammar, verbose=llama.verbose
+        ),
+    )
+    completion: llama_types.CreateCompletionResponse = completion_or_chunks  # type: ignore
+    text = completion["choices"][0]["text"]
+    if "message" in text:
+        return _convert_completion_to_chat(
+            llama.create_completion(
+                prompt=prompt + "message:\n",
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                typical_p=typical_p,
+                stream=stream,
+                stop=["<|im_end|>"],
+                logprobs=top_logprobs if logprobs else None,
+                max_tokens=None,
+                present_penalty=present_penalty,
+                frequency_penalty=frequency_penalty,
+                repeat_penalty=repeat_penalty,
+                top_n_sigma=top_n_sigma,
+                mirostat_mode=mirostat_mode,
+                mirostat_tau=mirostat_tau,
+                mirostat_eta=mirostat_eta,
+                xtc_threshold=xtc_threshold,
+                xtc_probability=xtc_probability,
+                dry_multiplier=dry_multiplier,
+                dry_base=dry_base,
+                dry_allowed_length=dry_allowed_length,
+                dry_penalty_last_n=dry_penalty_last_n,
+                dry_seq_breakers=dry_seq_breakers,
+                adaptive_target=adaptive_target,
+                adaptive_decay=adaptive_decay,
+                use_infill=use_infill,
+                model=model,
+                logits_processor=logits_processor,
+                grammar=llama_grammar.LlamaGrammar.from_string(
+                    follow_up_gbnf_tool_grammar, verbose=llama.verbose
+                ),
+            ),
+            stream=stream,
+        )
+
+    # One or more function calls
+    tool_name = text[len("functions.") :]
+    tool = next((tool for tool in tools if tool["function"]["name"] == tool_name), None)
+    if not stream:
+        completions: List[llama_types.CreateCompletionResponse] = []
+        completions_tool_name: List[str] = []
+        while tool is not None:
+            prompt += f"functions.{tool_name}:\n"
+            try:
+                grammar = llama_grammar.LlamaGrammar.from_json_schema(
+                    json.dumps(tool["function"]["parameters"]), verbose=llama.verbose
+                )
+            except Exception as e:
+                grammar = llama_grammar.LlamaGrammar.from_string(
+                    llama_grammar.JSON_GBNF, verbose=llama.verbose
+                )
+                if llama.verbose:
+                    print(
+                        "Failed to parse function body as JSON schema, falling back to default grammar"
+                    )
+                    print(e)
+            completion_or_chunks = llama.create_completion(
+                prompt=prompt,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                typical_p=typical_p,
+                stream=False,
+                stop=stop,
+                max_tokens=None,
+                present_penalty=present_penalty,
+                frequency_penalty=frequency_penalty,
+                repeat_penalty=repeat_penalty,
+                top_n_sigma=top_n_sigma,
+                mirostat_mode=mirostat_mode,
+                mirostat_tau=mirostat_tau,
+                mirostat_eta=mirostat_eta,
+                xtc_threshold=xtc_threshold,
+                xtc_probability=xtc_probability,
+                dry_multiplier=dry_multiplier,
+                dry_base=dry_base,
+                dry_allowed_length=dry_allowed_length,
+                dry_penalty_last_n=dry_penalty_last_n,
+                dry_seq_breakers=dry_seq_breakers,
+                adaptive_target=adaptive_target,
+                adaptive_decay=adaptive_decay,
+                use_infill=use_infill,
+                model=model,
+                logits_processor=logits_processor,
+                grammar=grammar,
+            )
+            completion_or_chunks = cast(
+                llama_types.CreateCompletionResponse, completion_or_chunks
+            )
+            completions.append(completion_or_chunks)
+            completions_tool_name.append(tool_name)
+            prompt += completion_or_chunks["choices"][0]["text"]
+            prompt += "\n"
+
+            response = llama.create_completion(
+                prompt=prompt,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                typical_p=typical_p,
+                stream=False,
+                stop=stop,
+                max_tokens=None,
+                present_penalty=present_penalty,
+                frequency_penalty=frequency_penalty,
+                repeat_penalty=repeat_penalty,
+                top_n_sigma=top_n_sigma,
+                mirostat_mode=mirostat_mode,
+                mirostat_tau=mirostat_tau,
+                mirostat_eta=mirostat_eta,
+                xtc_threshold=xtc_threshold,
+                xtc_probability=xtc_probability,
+                dry_multiplier=dry_multiplier,
+                dry_base=dry_base,
+                dry_allowed_length=dry_allowed_length,
+                dry_penalty_last_n=dry_penalty_last_n,
+                dry_seq_breakers=dry_seq_breakers,
+                adaptive_target=adaptive_target,
+                adaptive_decay=adaptive_decay,
+                use_infill=use_infill,
+                model=model,
+                logits_processor=logits_processor,
+                grammar=llama_grammar.LlamaGrammar.from_string(
+                    follow_up_gbnf_tool_grammar, verbose=llama.verbose
+                ),
+            )
+            response = cast(llama_types.CreateCompletionResponse, response)
+
+            tool_name = response["choices"][0]["text"][len("functions.") :]
+            tool = next(
+                (tool for tool in tools if tool["function"]["name"] == tool_name), None
+            )
+
+        # Merge completions
+        function_call_dict: Union[
+            Dict[str, str],
+            Dict[
+                Literal["function_call"],
+                llama_types.ChatCompletionRequestAssistantMessageFunctionCall,
+            ],
+        ] = (
+            {
+                "function_call": {
+                    "name": tool_name,
+                    "arguments": completions[0]["choices"][0]["text"],
+                }
+            }
+            if len(completions) == 1
+            else {}
+        )
+        return {
+            "id": "chat" + completion["id"],
+            "object": "chat.completion",
+            "created": completion["created"],
+            "model": completion["model"],
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "index": 0,
+                    "logprobs": _convert_text_completion_logprobs_to_chat(completion["choices"][0]["logprobs"]),
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_"
+                                + f"_{i}_"
+                                + tool_name
+                                + "_"
+                                + completion["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": completion["choices"][0]["text"],
+                                },
+                            }
+                            for i, (tool_name, completion) in enumerate(
+                                zip(completions_tool_name, completions)
+                            )
+                        ],
+                        **function_call_dict,
+                    },
+                }
+            ],
+            "usage": {
+                "completion_tokens": sum(
+                    (
+                        completion["usage"]["completion_tokens"]
+                        if "usage" in completion
+                        else 0
+                    )
+                    for completion in completions
+                ),
+                "prompt_tokens": sum(
+                    completion["usage"]["prompt_tokens"] if "usage" in completion else 0
+                    for completion in completions
+                ),
+                "total_tokens": sum(
+                    completion["usage"]["total_tokens"] if "usage" in completion else 0
+                    for completion in completions
+                ),
+            },
+        }
+
+    raise ValueError("Automatic streaming tool choice is not supported")
