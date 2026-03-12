@@ -73,7 +73,8 @@ untracked*.txt
 *.bin
 model.safetensors.index.json
 model-0000*
-input_model/*/*/
+input_model/*
+!input_model/reglas_base.md
 
 # Local debug and test scripts
 test_*.py
