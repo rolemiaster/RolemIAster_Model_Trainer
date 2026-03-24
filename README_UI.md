@@ -20,7 +20,10 @@ No necesita ser ingeniero para usarlos, aquí tiene una guía rápida:
 - **Epochs (Épocas):** Cuántas veces verá el modelo sus datos.
   - *Pocas (1-3):* Aprendizaje sutil, evita memorizar respuestas.
   - *Muchas (5+):* Memorización fuerte, riesgo de "sobreajuste" (el modelo se vuelve tonto en todo lo demás).
-- **Batch Size:** Cuántos ejemplos procesa a la vez. Mayor es más rápido pero requiere más VRAM.
+- **Estilo Narrativo (Narrative Style):** Controla el tono del dataset generado.
+  - *Literario:* Añade descripciones ricas y atmosféricas. Ideal para modelos pequeños (≤8B) para forzarles vocabulario literario.
+  - *Funcional:* Frases más directas. Ideal para modelos grandes (9B+) que ya poseen alta capacidad creativa latente.
+- **Razonamiento (Thinking Mode):** Permite suprimir las etiquetas `<think>` de los modelos compatibles durante el entrenamiento, obligándolos a no pensar y emitir el JSON directamente, optimizando velocidad en partida.
 
 ### Formato del Archivo de Reglas (.md)
 Para que el entrenador funcione, su archivo `.md` debe seguir una estructura específica. El programa busca ejemplos de "reglas" o "instrucciones" y su resultado esperado en formato JSON.
@@ -94,7 +97,9 @@ El programa incluye una pestaña de "Banco de Pruebas" vital para comprobar si e
    - **Aislado:** Prueba la regla específica únicamente.
    - **Compacto / Completo:** Prueba inyectando todo el archivo de reglas en el prompt, emulando condiciones reales de juego donde el modelo recibe "ruido" o reglas no relacionadas. Puede forzar "Ejecutar todos los modos" para evaluar la robustez frente al contexto masivo.
 3. **Umbrales (Thresholds):** Permite configurar el umbral de aprobado de Primera pasada (First pass), Segunda pasada (Final, tras reintento) y el porcentaje máximo tolerable de fallos con puerta de evaluación narrativa.
-4. **Ejecución:** Seleccione qué reglas probar de la lista y pulse "Ejecutar". Al finalizar, obtendrá un **Veredicto (Aprobado/Suspendido)** y un informe JSON detallado exportable a la carpeta `output_model/test_bench_reports`.
+4. **Ejecución y Auto-Tune:** Seleccione qué reglas probar de la lista y pulse "Ejecutar". 
+   - El sistema incluye la función **Auto-Tune**, que prueba automáticamente diferentes niveles de razonamiento (None, Low, Medium, High) para encontrar el equilibrio perfecto entre coste de tokens y tasa de acierto en JSON.
+5. **Historial de Pruebas:** Cada ejecución queda guardada y puede consultarse desde el botón "Historial", permitiendo comparar qué modelo ha funcionado mejor a lo largo del tiempo.
 
 ### Solución de Problemas
 - **Error de Memoria (OOM):** Reduzca el `Batch Size` o el `LoRA Rank`.
@@ -131,6 +136,11 @@ You don't need to be an engineer to use them, here is a quick guide:
   - *Few (1-3):* Subtle learning, prevents memorizing answers.
   - *Many (5+):* Strong memorization, risk of "overfitting" (the model becomes dumb at everything else).
 - **Batch Size:** How many examples it processes at once. Higher is faster but requires more VRAM.
+- **Narrative Style:** Controls the tone of the generated dataset.
+  - *Literary:* Adds rich, atmospheric descriptions. Ideal for small models (≤8B) to force literary vocabulary into them.
+  - *Functional:* More direct phrases. Ideal for large models (9B+) that already possess high latent creative capacity.
+- **Thinking Mode:** Allows suppressing `<think>` tags from compatible models during training, forcing them not to think and emit JSON directly, optimizing in-game speed.
+- **Auto-Tune:** Automatically tests different reasoning levels (None, Low, Medium, High) to find the perfect balance between token cost and JSON success rate.
 
 ### Rules File Format (.md)
 For the trainer to work, your `.md` file must follow a specific structure. The program looks for examples of "rules" or "instructions" and their expected result in JSON format.
@@ -204,7 +214,9 @@ The program includes a vital "Test Bench" tab to check if the resulting model ha
    - **Isolated:** Tests only the specific rule.
    - **Compact / Full:** Tests by injecting the entire rules file into the prompt, emulating real gaming conditions where the model receives "noise" or unrelated rules. You can force "Run all modes" to evaluate robustness against massive context.
 3. **Thresholds:** Allows you to configure the passing threshold for First pass, Final pass (after retry), and the maximum tolerable failure percentage with narrative evaluation gate.
-4. **Execution:** Select which rules to test from the list and click "Run". Upon completion, you will get a **Verdict (Pass/Fail)** and a detailed JSON report exportable to the `output_model/test_bench_reports` folder.
+4. **Execution & Auto-Tune:** Select which rules to test from the list and click "Run".
+   - The system includes an **Auto-Tune** function, which automatically tests different reasoning levels (None, Low, Medium, High) to find the perfect balance between token cost and JSON success rate.
+5. **Test History:** Every run is saved and can be checked using the "History" button, allowing you to compare which model performed best over time.
 
 ### Troubleshooting
 - **Memory Error (OOM):** Reduce `Batch Size` or `LoRA Rank`.
