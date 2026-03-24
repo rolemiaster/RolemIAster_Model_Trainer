@@ -52,9 +52,27 @@ if _compat_aliases:
         + ", ".join(_compat_aliases)
     )
 
+# --- PARCHE DE EMERGENCIA (GGUF COMPATIBILITY) ---
+# Fix para error "AttributeError: type object 'MODEL_ARCH' has no attribute 'MISTRAL4'"
+# El script de llama.cpp manipula sys.path para cargar su propio gguf-py, ignorando el .venv.
+# CRÍTICO: Este parche DEBE ejecutarse ANTES del import de unsloth, porque unsloth_zoo.llama_cpp
+# ejecuta _download_convert_hf_to_gguf() durante su inicialización (tiene @lru_cache).
+try:
+    import gguf
+    # Forzar que sys.modules['gguf'] apunte al gguf del .venv (que tiene MISTRAL4 parchado)
+    sys.modules['gguf'] = gguf
+    if hasattr(gguf.MODEL_ARCH, "MISTRAL4"):
+        print("[PATCH] gguf del .venv pre-cargado en sys.modules (MISTRAL4 disponible).")
+    else:
+        print("[WARN] gguf del .venv cargado pero MISTRAL4 no encontrado. Exportación GGUF puede fallar.")
+except Exception as patch_e:
+    print(f"[WARN] No se pudo aplicar parche GGUF sys.modules: {patch_e}")
+# -------------------------------------------------
+
 try:
     from unsloth import FastLanguageModel, FastModel
     from unsloth.save import save_to_gguf
+
 except Exception as e:
     print("[DEPENDENCY ERROR] No se pudo importar Unsloth.")
     print(f"[DEPENDENCY ERROR] Detalle: {e}")
@@ -261,22 +279,31 @@ def run_training(model_id_or_path, dataset_path, output_dir, params):
         else:
             raise e
 
-    # -- Qwen3.5: descargar encoder visual a CPU (solo usamos texto) --
-    # Qwen3.5 es multimodal (texto + vision). El encoder visual ocupa VRAM
-    # innecesariamente ya que solo se usa texto para el juego.
+    # -- Qwen3.5: descargar encoder visual y proyectores a CPU (solo usamos texto) --
+    # Qwen3.5 es multimodal (texto + vision). El encoder visual y su proyector
+    # ocupan VRAM innecesariamente ya que solo se usa texto para el juego.
     # IMPORTANTE: requires_grad_(False) NO libera VRAM, hay que mover a CPU.
     if is_qwen35:
-        visual = getattr(model, "visual", None)
-        if visual is None:
-            inner = getattr(model, "model", None)
-            if inner is not None:
-                visual = getattr(inner, "visual", None)
-        if visual is not None:
-            visual.to("cpu")
-            visual.requires_grad_(False)
+        vision_modules = ["visual", "vision_projector", "multimodal_projector"]
+        freed_modules = []
+        
+        for v_name in vision_modules:
+            v_mod = getattr(model, v_name, None)
+            if v_mod is None:
+                inner = getattr(model, "model", None)
+                if inner is not None:
+                    v_mod = getattr(inner, v_name, None)
+            
+            if v_mod is not None:
+                v_mod.to("cpu")
+                v_mod.requires_grad_(False)
+                freed_modules.append(v_name)
+                
+        if freed_modules:
             torch.cuda.empty_cache()
             vram_after = torch.cuda.memory_allocated(0) / (1024**3) if torch.cuda.is_available() else 0
-            print(f"[QWEN3.5] Encoder visual movido a CPU (solo texto). VRAM post-descarga: {vram_after:.2f} GB")
+            moved_str = ", ".join(freed_modules)
+            print(f"[QWEN3.5] Componentes visuales podados a CPU [{moved_str}]. VRAM post-descarga: {vram_after:.2f} GB")
 
     # [DIAGNOSTICO] Verificar estado de CUDA/GPU
     if torch.cuda.is_available():
@@ -349,6 +376,45 @@ def run_training(model_id_or_path, dataset_path, output_dir, params):
                 parts.append(f"[{role}] {content}")
             return "\n".join(parts)
 
+        # --- THINK-SUPPRESSION: Protección contra templates con lógica de razonamiento ---
+        # Modelos como Qwen 3.5, DeepSeek-R1, etc. incluyen bloques <think> en su
+        # chat_template nativo. Si entrenamos con ese template, el SFT se contamina:
+        # el modelo aprende a esperar/generar bloques de razonamiento que no existen
+        # en nuestro dataset (JSON puro). Sobreescribimos con ChatML limpio.
+        _THINK_PATTERNS = ("enable_thinking", "<think>", "<thought>", "reasoning_content")
+        _CHATML_CLEAN = (
+            "{% for message in messages %}"
+            "{% if message['role'] == 'system' %}"
+            "<|im_start|>system\n{{ message['content'] }}<|im_end|>\n"
+            "{% elif message['role'] == 'user' %}"
+            "<|im_start|>user\n{{ message['content'] }}<|im_end|>\n"
+            "{% elif message['role'] == 'assistant' %}"
+            "<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n"
+            "{% endif %}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}"
+            "<|im_start|>assistant\n"
+            "{% endif %}"
+        )
+
+        thinking_mode = str(params.get("thinking_mode", "suppress")).strip().lower()
+        if thinking_mode == "suppress" and hasattr(tokenizer, "chat_template"):
+            original_template = str(getattr(tokenizer, "chat_template", "") or "")
+            has_thinking = any(pat in original_template for pat in _THINK_PATTERNS)
+            if has_thinking:
+                tokenizer.chat_template = _CHATML_CLEAN
+                print(
+                    "[THINK-SUPPRESSION] Template nativo contiene lógica de razonamiento "
+                    f"(patrones detectados: {[p for p in _THINK_PATTERNS if p in original_template]}). "
+                    "Sobreescrito con ChatML limpio para entrenamiento SFT."
+                )
+            else:
+                print("[THINK-SUPPRESSION] Template nativo no contiene lógica de razonamiento. Sin cambios.")
+        elif thinking_mode == "native":
+            print("[THINK-SUPPRESSION] Modo 'nativo' seleccionado. Template del modelo sin modificar.")
+        else:
+            print(f"[THINK-SUPPRESSION] Modo: {thinking_mode}. Sin intervención en template.")
+
         use_native_chat_template = hasattr(tokenizer, "apply_chat_template")
         if use_native_chat_template:
             try:
@@ -386,6 +452,36 @@ def run_training(model_id_or_path, dataset_path, output_dir, params):
             return {"text": texts}
 
         dataset = dataset.map(formatting_prompts_func, batched = True,)
+        
+        # --- FILTRADO DE EJEMPLOS LARGOS (PROTECCIÓN EOS) ---
+        # Descartamos ejemplos que superen max_seq_length en lugar de dejar que
+        # el SFTTrainer los trunque silenciosamente. Truncar amputaría el token
+        # de parada <|im_end|>, enseñando al modelo a NO emitir EOS en respuestas
+        # largas (causa raíz de verborrea infinita y JSON incompleto).
+        original_size = len(dataset)
+        try:
+            _tok_ref = tokenizer  # captura para closure
+            _max_len = max_seq_length
+
+            def _fits_in_context(example):
+                toks = _tok_ref(example["text"], truncation=False)["input_ids"]
+                return len(toks) <= _max_len
+
+            dataset = dataset.filter(_fits_in_context, num_proc=1)
+            filtered_out = original_size - len(dataset)
+            if filtered_out > 0:
+                pct = (filtered_out / original_size) * 100
+                print(
+                    f"[DATASET] Filtrados {filtered_out}/{original_size} ejemplos ({pct:.1f}%) "
+                    f"que superaban max_seq_length={max_seq_length} tokens. "
+                    f"Esto preserva el token de parada en el 100% del dataset restante."
+                )
+            else:
+                print(f"[DATASET] Todos los ejemplos caben en max_seq_length={max_seq_length}. Sin filtrado.")
+        except Exception as filter_e:
+            print(f"[WARN] No se pudo filtrar por longitud: {filter_e}. Se continuará sin filtrado.")
+        # ---------------------------------------------------
+
         # Eliminar columna 'conversations' para que TRL no intente re-procesarla
         # (TRL lee 'conversations' raw con roles "human"/"gpt" y falla porque espera "user"/"assistant")
         if "conversations" in dataset.column_names:
@@ -419,6 +515,23 @@ def run_training(model_id_or_path, dataset_path, output_dir, params):
                 output_dir = "outputs",
             ),
         )
+
+        # --- TRAIN ON RESPONSES ONLY ---
+        # Enmascarar system prompt y user prompt en la función de loss
+        # Usamos los tokens ChatML reales producidos por apply_chat_template en Qwen
+        try:
+            from unsloth.chat_templates import train_on_responses_only
+            trainer = train_on_responses_only(
+                trainer,
+                instruction_part = "<|im_start|>user\n",
+                response_part = "<|im_start|>assistant\n",
+            )
+            print("[UNSLOTH] 'train_on_responses_only' activado: el loss solo se calculará sobre el output JSON.")
+        except ImportError:
+            print("[WARN] No se pudo importar 'train_on_responses_only' de unsloth. Entrenando sobre toda la secuencia.")
+        except Exception as e:
+            print(f"[WARN] Error al configurar 'train_on_responses_only': {e}")
+        # -------------------------------
 
         # 6. Entrenar
         print(f">>> {tr('log_training_real_time')} <<<")
@@ -460,6 +573,24 @@ def run_training(model_id_or_path, dataset_path, output_dir, params):
         if not resume_mode:
             print(f"Guardando adaptadores LoRA en: {adapters_dir}")
             model.save_pretrained(str(adapters_dir))
+            
+            # Guardar metadata de entrenamiento
+            training_meta = {
+                "rank": int(params.get("rank", 32)),
+                "alpha": int(params.get("alpha", 64)),
+                "batch_size": int(params.get("batch_size", 2)),
+                "effective_batch_size": per_device_batch * grad_acc_steps,
+                "learning_rate": float(params.get("learning_rate", 2e-4)),
+                "epochs": int(params.get("epochs", 3)),
+                "max_seq_length": max_seq_length,
+                "grad_accumulation_steps": grad_acc_steps,
+                "train_on_responses_only": True
+            }
+            meta_path = run_output_dir / "training_meta.json"
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(training_meta, f, indent=4, ensure_ascii=False)
+            print(f"[EXPORT] Metadata de entrenamiento guardada en: {meta_path}")
+            
             lora_saved_ok = True
         else:
             print(f"[RESUME] Se reutilizan adaptadores existentes: {adapters_dir}")
@@ -755,7 +886,11 @@ def run_training(model_id_or_path, dataset_path, output_dir, params):
             first_conversion = "f16"
 
         source_name = resume_base_model_path if resume_mode else model_id_or_path
-        model_name_for_gguf = Path(str(source_name).rstrip("/\\")).name or "model"
+        base_model_name = Path(str(source_name).rstrip("/\\")).name or "model"
+        
+        # Añadir timestamp (usando guión en lugar de dos puntos para compatibilidad con Windows)
+        ts_suffix = datetime.now().strftime("_%Y-%m-%d_%H-%M")
+        model_name_for_gguf = f"{base_model_name}{ts_suffix}"
 
         print(
             "Exportando modelo completo a GGUF (q4_k_m) desde carpeta mergeada "
@@ -811,6 +946,33 @@ def run_training(model_id_or_path, dataset_path, output_dir, params):
                 f"GGUF inválido detectado ({final_size} bytes). "
                 "El archivo era demasiado pequeño y fue eliminado."
             )
+
+        try:
+            sidecar_meta_path = Path(str(target_gguf) + ".training.json")
+            training_meta = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "base_model": str(model_id_or_path),
+                "output_gguf": target_gguf.name,
+                "rank": int(params.get("rank", 32)),
+                "alpha": int(params.get("alpha", 64)),
+                "requested_batch_size": int(params.get("batch_size", 2)),
+                "requested_grad_accumulation_steps": int(
+                    params.get("gradient_accumulation_steps", params.get("grad_accumulation_steps", 4))
+                ),
+                "per_device_batch_size": int(per_device_batch),
+                "grad_accumulation_steps": int(grad_acc_steps),
+                "effective_batch_size": int(per_device_batch * grad_acc_steps),
+                "learning_rate": float(params.get("learning_rate", 2e-4)),
+                "epochs": int(params.get("epochs", 3)),
+                "max_seq_length": int(max_seq_length),
+                "qwen35": bool(is_qwen35),
+                "fla_available": bool(fla_available),
+            }
+            with open(sidecar_meta_path, "w", encoding="utf-8") as f:
+                json.dump(training_meta, f, indent=2, ensure_ascii=False)
+            print(f"[EXPORT] Metadata de entrenamiento guardada junto al GGUF: {sidecar_meta_path}")
+        except Exception as meta_e:
+            print(f"[WARN] No se pudo guardar metadata de entrenamiento junto al GGUF: {meta_e}")
 
         print(f"GGUF guardado en {output_dir}")
     except Exception as e:

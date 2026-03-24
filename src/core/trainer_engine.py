@@ -34,7 +34,8 @@ class TrainerEngine:
             if not output_dir.exists():
                 output_dir.mkdir(parents=True, exist_ok=True)
                 
-            success = generate_robust_dataset(str(md_path), str(dataset_path))
+            narrative_style = str(params.get("narrative_style", "literary")).strip().lower()
+            success = generate_robust_dataset(str(md_path), str(dataset_path), narrative_style=narrative_style)
             if not success:
                 self.log(self.tr("log_dataset_generation_failed"))
                 return False

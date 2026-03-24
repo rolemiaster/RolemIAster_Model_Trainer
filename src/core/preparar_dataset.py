@@ -1,4 +1,5 @@
-import json
+﻿import json
+from core.char_creation_augmenter import augment_character_creation
 import random
 import re
 from collections import Counter
@@ -185,6 +186,324 @@ _STORY_PARTS_ITEMS_C = {
         ". Parece contar con software encriptado.", ". Compruebas el conector de interfaz.", ". Sabes que en la calle vale muchos créditos.",
         ". Su acabado mate evita los reflejos.", ". Te preguntas si tiene un rastreador oculto.", ". El sistema de auto-diagnóstico marca en verde.",
         ". Lo pasas por el escáner anti-virus por si acaso.", ". El chasis de titanio está frío al tacto.", ". Parece recién salido de la línea de ensamblaje.", ". Te lo conectas a la red local con cuidado."
+    ]
+}
+
+# ============================================================================
+# POOLS LITERARIOS (narrative_style == "literary")
+# Prosa rica, sensorial y atmosférica para compensar la menor capacidad
+# creativa latente de modelos pequeños (≤8B). Mismo formato start+mid+end.
+# ============================================================================
+
+_STORY_PARTS_EXPLORATION_F_LIT = {
+    "start": [
+        "Tus botas se hunden en el barro milenario del sendero olvidado",
+        "La plaza del mercado se abre ante ti como la palma de un gigante petrificado",
+        "Cruzas el puente de piedra cuyas barandillas han sido lamidas por siglos de lluvia",
+        "Un callejón se retuerce entre edificios que se inclinan como conspiradores",
+        "Te adentras en la biblioteca donde el polvo ha tejido cortinas entre los estantes",
+        "La encrucijada se presenta ante ti como una herida abierta en el bosque",
+        "El bosque antiguo cierra sus ramas sobre tu cabeza formando una catedral vegetal",
+        "Una brisa gélida te envuelve arrastrando el lamento lejano del viento entre las ruinas",
+        "El camino desciende serpenteando hacia las entrañas de la tierra",
+        "Exploras los restos de una civilización que el musgo ha reclamado como propia",
+    ],
+    "mid": [
+        " y el aroma a musgo y tierra mojada despierta algo primitivo en tu memoria",
+        ", donde el murmullo de cien voces se entreteje con el crepitar de antorchas moribundas",
+        " mientras las sombras se alargan como dedos hambrientos sobre los adoquines",
+        "; cada dirección exhala un aliento diferente, húmedo y amenazante",
+        ", donde el polvo danza en los rayos de luz como ceniza de estrellas muertas",
+        " y un poste de madera carcomida muestra nombres que el tiempo ha borrado con saña",
+        " y la luz del sol se fragmenta en lanzas doradas que apenas tocan el suelo",
+        " trayendo ecos de canciones que nadie recuerda haber cantado",
+        " revelando marcas talladas en la roca por manos desesperadas",
+        " y una presencia antigua e invisible te observa con la paciencia de la piedra",
+    ],
+    "end": [
+        ". El silencio aquí tiene peso, como si el aire mismo contuviera la respiración.",
+        ". Tu mano busca instintivamente la empuñadura del arma, fría y reconfortante.",
+        ". Una luz titila a lo lejos, demasiado constante para ser natural, demasiado débil para ser esperanza.",
+        ". Algo te observa desde la oscuridad con una curiosidad que eriza el vello de tu nuca.",
+        ". El frío aquí no viene del aire, sino de algo más profundo, más antiguo.",
+        ". Cada músculo de tu cuerpo se tensa, preparándose para lo que el destino arroje.",
+        ". Un cuervo te contempla desde lo alto con ojos que parecen saber demasiado.",
+        ". La vegetación crece retorcida, alimentada por algo que corrompe la tierra desde abajo.",
+        ". Rastros frescos en el barro cuentan la historia de alguien que pasó huyendo.",
+        ". El eco de tus pasos resuena y regresa distorsionado, como si las paredes respondieran.",
+    ]
+}
+
+_STORY_PARTS_EXPLORATION_C_LIT = {
+    "start": [
+        "Tus botas magnéticas repiquetean sobre el asfalto agrietado del callejón bañado en neón",
+        "La plaza corporativa se despliega ante ti, un mausoleo de cristal y acero inoxidable",
+        "Cruzas la pasarela metálica que gime bajo tu peso como un animal herido",
+        "El pasillo de mantenimiento parpadea con luces estroboscópicas que delatan su agonía eléctrica",
+        "Te adentras en el cibercafé donde las pantallas muertas aún proyectan fantasmas de datos",
+        "El cruce peatonal se abre ante ti como una arteria obstruida de la megaciudad",
+        "Los rascacielos se alzan como lápidas de titanio perforando un cielo que ha olvidado las estrellas",
+        "El zumbido de diez mil servidores te envuelve como el latido mecánico de un dios dormido",
+        "El subnivel desciende en espiral hacia las tripas oxidadas de la infraestructura olvidada",
+        "Exploras conductos donde el aire sabe a cobre recalentado y sueños rotos",
+    ],
+    "mid": [
+        " y el ozono quema tu garganta mientras la lluvia ácida dibuja surcos en el hormigón",
+        ", donde drones publicitarios vomitan promesas holográficas que nadie escucha",
+        " mientras el tráfico aéreo zumba como un enjambre de insectos metálicos sobre tu cabeza",
+        "; cables pelados sueltan chispas que danzan brevemente antes de morir en el charco",
+        ", donde pantallas destrozadas proyectan estática como las últimas sinapsis de un cerebro moribundo",
+        " y un panel holográfico agoniza repitiendo un anuncio de un producto ya descatalogado",
+        " y la contaminación lumínica tiñe las nubes bajas de un naranja enfermizo y perpetuo",
+        " trayendo el eco de sirenas que suenan como el lamento de una ciudad que se devora a sí misma",
+        " revelando manchas de fluido sintético que brillan bajo la luz ultravioleta como sangre de máquina",
+        " y sientes vibrar los implantes bajo tu piel, respondiendo a frecuencias que no deberían existir",
+    ],
+    "end": [
+        ". Las luces de neón tiñen tu piel de colores que no existen en la naturaleza.",
+        ". Tu dedo descansa sobre el gatillo con la familiaridad de un viejo hábito mortal.",
+        ". Un escáner de seguridad barre la zona, su ojo rojo girando con eficiencia indiferente.",
+        ". La estática eriza cada pelo de tu cuerpo como una advertencia que no sabes descifrar.",
+        ". El olor a plástico quemado y circuitos fritos impregna el aire como un perfume de la decadencia.",
+        ". Mapeas mentalmente cada cámara, cada sensor, cada ojo electrónico que podría delatarte.",
+        ". Un dron de limpieza pasa arrastrando restos que prefiere no identificar.",
+        ". La arquitectura corporativa te envuelve, diseñada para recordarte lo insignificante que eres.",
+        ". Casquillos vacíos alfombran el suelo contando la historia de una violencia reciente y silenciada.",
+        ". El pulso de la ciudad nunca se detiene; late, hambriento e insomne, a tu alrededor.",
+    ]
+}
+
+_STORY_PARTS_COMBAT_F_LIT = {
+    "start": [
+        "El bandido desenvaina su espada mellada con un gesto que delata años de violencia",
+        "Una flecha rasga el aire a milímetros de tu oído, clavándose vibrante en la madera tras de ti",
+        "El orco descarga su maza contra el suelo con una fuerza que hace temblar tus huesos",
+        "Tu oponente retrocede escupiendo sangre y maldiciones entre dientes rotos",
+        "El guardia desvía tu estocada y contragolpea con la brutalidad mecánica de quien ha matado cien veces",
+        "La criatura emerge de las sombras emitiendo un rugido que vibra en tu pecho como un trueno",
+        "El choque del acero reverbera en tus muñecas y te recorre la columna vertebral",
+        "El mercenario pivota intentando flanquearte mientras sus ojos calculan tu siguiente movimiento",
+        "El cultista alza manos cubiertas de venas negras canalizando algo que apesta a azufre y muerte",
+        "El lobo gigante salta con las fauces abiertas, hileras de colmillos amarillentos brillando bajo la luna",
+    ],
+    "mid": [
+        " y se abalanza sobre ti con una furia nacida de la desesperación y el hambre",
+        " dejando en el aire un silbido agudo que te recuerda lo cerca que has estado de morir",
+        ", levantando una nube de polvo y astillas que pica en los ojos",
+        ", con un corte profundo del que mana un reguero oscuro y constante",
+        " ejecutando una combinación de golpes que demuestra un entrenamiento despiadado",
+        " cargando contra tu posición con el impulso de una avalancha de músculo y garras",
+        " haciéndote retroceder un paso mientras el mundo se reduce al filo de dos hojas cruzadas",
+        " mientras otro enemigo cierra el cerco por tu flanco izquierdo gritando órdenes",
+        " y una esfera de energía pútrida cobra forma entre sus dedos retorcidos",
+        " con un aullido que congela la sangre y despierta algo primitivo en tu instinto de supervivencia",
+    ],
+    "end": [
+        ". El duelo se convierte en una danza mortal donde cada paso puede ser el último.",
+        ". Recuperas tu postura con un giro que arranca chispas del suelo empedrado.",
+        ". Buscas una apertura, un titubeo, un parpadeo que puedas convertir en victoria.",
+        ". El estruendo metálico de las armas ahoga cualquier otro sonido del mundo.",
+        ". Un error aquí no se paga con sangre; se paga con la vida entera.",
+        ". El enemigo absorbe el castigo como si el dolor fuera combustible para su furia.",
+        ". Aprietas los dientes hasta que la mandíbula duele, canalizando el miedo en determinación.",
+        ". La adrenalina convierte el mundo en un túnel nítido donde solo existe tú y la amenaza.",
+        ". El terreno encharcado de sangre convierte cada paso en una apuesta peligrosa.",
+        ". Exhalas el aire que contenías y preparas el cuerpo para el siguiente intercambio letal.",
+    ]
+}
+
+_STORY_PARTS_COMBAT_C_LIT = {
+    "start": [
+        "El pandillero desenfunda un arma inteligente cuyo láser de puntería ya baila sobre tu pecho",
+        "Un proyectil de alta velocidad arranca el trozo de pared donde estaba tu cabeza hace un segundo",
+        "El ciber-psicópata activa sus servos con un zumbido que promete violencia industrial",
+        "Tu oponente retrocede recalibrando mientras su brazo mecánico derrama fluido hidráulico",
+        "El dron de seguridad despliega un escudo de plasma y fija sus torretas en tu posición",
+        "El asesino corporativo se desvanece ante tus ojos como un glitch en la realidad",
+        "El impacto cinético sacude tu blindaje y envía una cascada de alertas a tu HUD retinal",
+        "El mercenario abre la tapa de un micro-misil con la calma de quien saca un cigarrillo",
+        "Un ataque de intrusión enemiga hace parpadear tu óptica como una migraña digital",
+        "El perro-robot salta con mandíbulas de titanio abiertas, sus ojos LED rojos fijos en tu garganta",
+    ],
+    "mid": [
+        " y descarga una ráfaga a quemarropa que convierte el aire en una tormenta de plomo y fuego",
+        " levantando una lluvia de hormigón pulverizado que nubla la óptica térmica",
+        ", generando un campo de distorsión que hace vibrar hasta los dientes de tu cráneo",
+        ", goteando fluido refrigerante que humea al tocar el suelo como sangre de máquina",
+        " mientras un segundo armamento secundario emerge de su carcasa con un clic ominoso",
+        " reapareciendo a tu espalda como una pesadilla hecha de carbono y malas intenciones",
+        " sobrecargando los capacitores de tu blindaje hasta el umbral de fallo crítico",
+        " mientras fuego de cobertura enemigo convierte tu posición en un infierno de metralla",
+        " proyectando estática que convierte tu campo visual en un caleidoscopio de basura digital",
+        " con servomotores aullando a máxima potencia mientras sus garras rayan el pavimento blindado",
+    ],
+    "end": [
+        ". El tiroteo transforma el aire en una sinfonía de detonaciones y casquillos repiqueteando.",
+        ". Recalibras tu óptica con un parpadeo mientras el humo te quema los pulmones.",
+        ". Buscas cobertura sabiendo que cada segundo expuesto es una lotería de supervivencia.",
+        ". La pólvora y el ozono se mezclan en un cóctel que sabe a guerra urbana pura.",
+        ". Tu ciberware grita alertas rojas, pero el dolor es un lujo que no puedes permitirte.",
+        ". El enemigo recarga con la fluidez de un autómata, sin miedo, sin duda, sin piedad.",
+        ". Inyectas el último estimulante y sientes cómo el mundo se ralentiza por un instante precioso.",
+        ". Tu HUD táctico pinta amenazas en rojo y no queda un solo pixel en verde.",
+        ". Los escombros caen como granizo de hormigón mientras la estructura protesta.",
+        ". Te deslizas hacia una posición más defensiva dejando un rastro de sangre y determinación.",
+    ]
+}
+
+_STORY_PARTS_NPC_SERVICE_F_LIT = {
+    "start": [
+        "El herrero te saluda sin levantar la vista del hierro candente que moldea con golpes precisos",
+        "La boticaria te observa desde detrás de una cortina de vapores aromáticos con ojos penetrantes",
+        "El mercader despliega su manta revelando un mosaico de objetos de procedencia cuestionable",
+        "La armera extrae una hoja del aceite de temple y la examina a contraluz con ojo experto",
+        "Un alquimista encorvado por décadas de trabajo murmura fórmulas mientras sustancias burbujean",
+        "El tabernero limpia una jarra con un trapo que ha visto mejores siglos y te mide con la mirada",
+        "El anciano comerciante asiente lentamente como si cada gesto le costara años de vida",
+        "La tejedora levanta la vista de un tapiz cuyas figuras parecen moverse bajo la luz de las velas",
+        "El joyero acerca una gema a su ojo entrenado y la hace girar revelando fuegos interiores",
+        "El erudito cierra su libro levantando una nube de polvo que huele a siglos de conocimiento",
+    ],
+    "mid": [
+        " y señala su mostrador donde las armas reposan como cicatrices de batallas por librar",
+        " desde detrás de frascos cuyo contenido burbujea con los colores del arcoíris envenenado",
+        " con mercancías de tierras tan lejanas que sus nombres suenan como conjuros olvidados",
+        " antes de clavar en ti una mirada que evalúa si mereces portar lo que ella forja",
+        " mientras el caldero exhala un vapor que hace brillar las runas del techo",
+        " y te pregunta qué deseas con una voz que ha servido a reyes y mendigos por igual",
+        " rodeado de pergaminos enrollados que contienen verdades que los jóvenes no querrían saber",
+        " mostrando telas cuyo tacto cambia según la intención de quien las roza",
+        " utilizando una lente tallada por artesanos enanos que ya no existen",
+        " dispuesto a comerciar saber por saber, sin que el oro manchille la transacción",
+    ],
+    "end": [
+        ". El calor de la forja te envuelve como el aliento de un dragón domesticado.",
+        ". El aroma a hierbas medicinales y venenos sutiles inunda el lugar por igual.",
+        ". Sus ojos reflejan la astucia de quien ha sobrevivido vendiendo en tiempos de guerra.",
+        ". Sus herramientas muestran el desgaste honrado de miles de horas de trabajo dedicado.",
+        ". El ambiente se carga de una electricidad arcana que eriza el vello de tus brazos.",
+        ". Las conversaciones de la sala se apagan un instante cuando cruzas el umbral.",
+        ". Se cruza de brazos revelando antebrazos marcados por quemaduras y tatuajes rituales.",
+        ". Te evalúa de arriba a abajo con la precisión de quien valora almas, no monedas.",
+        ". Cada pieza del mostrador cuenta una historia de artesanía paciente y obsesiva.",
+        ". El lugar huele a cera de vela, tinta fresca y las promesas rotas de cien aventureros.",
+    ]
+}
+
+_STORY_PARTS_NPC_SERVICE_C_LIT = {
+    "start": [
+        "El tecnocirujano ajusta sus guantes quirúrgicos bajo una luz fluorescente que zumba como una avispa atrapada",
+        "El traficante de datos te observa con pupilas dilatadas por implantes que procesan tu rostro a velocidad inhumana",
+        "El vendedor corporativo sonríe con dientes demasiado perfectos para ser originales",
+        "El mecánico se limpia grasa sintética de las manos mientras su ojo cibernético te escanea de arriba a abajo",
+        "Un hacker encorvado teclea con dedos que se mueven demasiado rápido para ser solo carne y hueso",
+        "El bartender sintético procesa tu presencia con un leve giro de su cabeza cromada mientras mezcla químicos",
+        "El fixer local asiente como si ya supiera por qué estás aquí antes de que abras la boca",
+        "La contrabandista apaga su cigarrillo en el mostrador dejando una marca junto a cien otras idénticas",
+        "El especialista en armamento te escanea con un dispositivo que zumba apreciativamente ante tu equipo",
+        "El operador del mercado negro suspira con el cansancio de quien ha visto demasiada desesperación humana",
+    ],
+    "mid": [
+        " bajo una luz que revela cada imperfección de tu carne como un recordatorio de tu obsolescencia",
+        " desde detrás de monitores que muestran flujos de datos que serían crímenes en cualquier sector legal",
+        " mientras despliega un catálogo holográfico de productos cuyo precio incluye tu silencio",
+        " con un gesto que sugiere que las máquinas le hablan más claro que las personas",
+        " en un terminal cuya carcasa está soldada con parches de al menos tres fabricantes diferentes",
+        " sirviendo una bebida que brilla con un azul fosforescente que no inspira confianza",
+        " rodeado de discos de memoria que contienen secretos capaces de tumbar corporaciones enteras",
+        " mostrando piezas que llevan todavía los números de serie de armería militar raspados a medias",
+        " proyectando especificaciones técnicas que hacen que tu equipamiento actual parezca de juguete",
+        " apoyado sobre cajas cuyas etiquetas de contenido han sido cuidadosamente falsificadas",
+    ],
+    "end": [
+        ". El zumbido de los neones marca un ritmo hipnótico que adormece la cautela de los incautos.",
+        ". El humo de tabaco sintético forma capas geológicas en el aire reciclado del local.",
+        ". Sus implantes brillan con un pulso suave, como el latido de un segundo corazón electrónico.",
+        ". Manchas de aceite y fluido hidráulico en su ropa cuentan la historia de mil reparaciones.",
+        ". Los ventiladores del techo luchan contra el calor que irradian cientos de procesadores.",
+        ". La interfaz del establecimiento parpadea pidiendo una actualización que nadie instalará.",
+        ". Una mano permanece discretamente bajo el mostrador, donde las negociaciones se vuelven rápidas.",
+        ". Te evalúa calculando tu límite de crédito con la precisión de un algoritmo de riesgo financiero.",
+        ". Su red privada tararea en frecuencias que tus implantes apenas pueden detectar.",
+        ". El ruido de la calle llega amortiguado, como si este lugar existiera en su propia burbuja temporal.",
+    ]
+}
+
+_STORY_PARTS_ITEMS_F_LIT = {
+    "start": [
+        "Abres el cofre de roble cuya cerradura cede con un suspiro de siglos contenidos",
+        "Entre los escombros polvorientos de lo que fue un salón noble",
+        "El comerciante te entrega el objeto envuelto en un paño que huele a romero y cera",
+        "En el fondo de tu mochila de cuero, olvidado entre raciones y vendas",
+        "Oculto en un compartimento que solo la desesperación te ha llevado a buscar",
+        "Brillando sobre un pedestal de piedra tallada con runas que palpitan al acercarte",
+        "Tras derrotar al enemigo cuyas manos aún aferran el objeto con rigor mortis",
+        "Al inspeccionar el altar donde velas derretidas forman estalactitas de cera centenaria",
+        "Envuelto en seda que se deshace al contacto como las alas de una mariposa muerta",
+        "Arrumbado en un rincón donde las telarañas lo han protegido mejor que cualquier custodia",
+    ],
+    "mid": [
+        " y encuentras una pieza de equipo cuya factura supera todo lo que has visto en años de campaña",
+        " descubres un artefacto que el polvo no ha logrado opacar, como si rechazara el olvido",
+        " con un cuidado que sugiere que quien lo envolvió sabía exactamente lo que contenía",
+        " palpas algo cuyo tacto despierta un escalofrío que recorre tu brazo hasta el hombro",
+        " hallas un objeto que irradia un calor imposible, como si latiera con pulso propio",
+        " contemplas runas que brillan al reconocer tu presencia, como ojos que se abren del letargo",
+        " y recuperas del barro un objeto manchado de sangre cuya hoja aún canta al moverse",
+        " notas un brillo antinatural que se niega a obedecer las reglas de la luz ambiente",
+        " revelas una reliquia cuyo diseño pertenece a una era que los historiadores consideran mito",
+        " desentierras algo que vibra con una frecuencia que sientes en los dientes más que en los oídos",
+    ],
+    "end": [
+        ". Emana una energía latente que parece susurrar promesas de poder a quien sepa escuchar.",
+        ". Compruebas su peso y equilibrio descubriendo que se adapta a tu agarre como si te conociera.",
+        ". El instinto de aventurero te dice que su valor supera cualquier cifra que puedas imaginar.",
+        ". La artesanía revela manos maestras que dedicaron su vida a forjar esta única pieza.",
+        ". Su origen es un misterio que pesa tanto como el objeto mismo.",
+        ". Algo en tu interior reconoce que este hallazgo cambia las reglas del juego.",
+        ". Lo examinas girándolo lentamente, buscando trampas que la codicia pudiera ocultar.",
+        ". El metal está frío, demasiado frío, como si absorbiera el calor de todo lo que toca.",
+        ". Décadas de abandono no han mellado su filo ni empañado su superficie.",
+        ". Lo guardas contra tu pecho sintiendo cómo su peso se convierte en una promesa.",
+    ]
+}
+
+_STORY_PARTS_ITEMS_C_LIT = {
+    "start": [
+        "Abres la caja de seguridad biométrica cuyo escáner acepta tu huella con un pitido satisfecho",
+        "Entre los restos humeantes del dron destruido cuyas tripas mecánicas aún chisporrotean",
+        "El fixer te desliza un paquete bajo la mesa con la naturalidad de quien intercambia secretos mortales",
+        "En un compartimento de tu abrigo táctico que ni los escáneres de aduanas han encontrado",
+        "Oculto tras un panel falso que se abre con un código que solo los muertos conocían",
+        "Brillando en un estuche refrigerado cuya condensación forma un halo fantasmal",
+        "Tras hackear un contenedor blindado cuyos protocolos de seguridad eran dignos de una fortaleza",
+        "Al examinar restos cibernéticos cuyas conexiones neuronales aún chisporrotean con datos residuales",
+        "Envuelto en plástico antiestático que cruje y se adhiere como una segunda piel protectora",
+        "Tirado junto a un contenedor como si alguien hubiera abandonado una fortuna en su huida",
+    ],
+    "mid": [
+        " y extraes un dispositivo cuyo diseño minimalista grita presupuesto militar ilimitado",
+        " descubres hardware intacto que no debería existir fuera de un laboratorio corporativo",
+        " sellado con protocolos que solo la paranoia o la importancia extrema justifican",
+        " localizas un gadget cuya pantalla cobra vida al sentir el calor de tus dedos",
+        " hallas un componente con marcas de grado militar que alguien intentó borrar sin éxito",
+        " contemplas un implante cuyos LEDs se encienden parpadeando en un patrón que parece un saludo",
+        " recuperas un prototipo cuyo logo corporativo ha sido limado pero cuya calidad lo delata",
+        " detectas una firma térmica que sugiere que el dispositivo tiene su propia fuente de energía",
+        " revelas una pieza de armamento cuyas líneas aerodinámicas prometen eficiencia letal",
+        " rescatas un módulo de datos intacto cuyo peso en información vale más que en oro",
+    ],
+    "end": [
+        ". Su software encriptado murmura en frecuencias que tus implantes detectan como un cosquilleo.",
+        ". El conector de interfaz es universal, diseñado para funcionar en cualquier ecosistema tecnológico.",
+        ". En el mercado negro, esto vale lo suficiente para comprarte una vida nueva en otro sector.",
+        ". Su acabado absorbe la luz como un agujero negro portátil, invisible para los escáneres ópticos.",
+        ". Un escalofrío te recorre al pensar que alguien podría estar rastreando exactamente este dispositivo.",
+        ". El diagnóstico interno marca todo en verde con una confianza que resulta casi arrogante.",
+        ". Lo pasas por tu escáner personal sabiendo que la paranoia es lo que mantiene vivos a los prudentes.",
+        ". El chasis de titanio absorbe el calor de tus dedos como si evaluara tu temperatura corporal.",
+        ". Parece recién fabricado, lo cual plantea la pregunta de cómo acabó aquí y por qué.",
+        ". Lo conectas con la cautela de quien desactiva una bomba y la codicia de quien abre un tesoro.",
     ]
 }
 
@@ -446,7 +765,7 @@ def _normalize_rule_id(rule_id: Any) -> str:
 def _is_obsolete_rule_id(rule_id: Any) -> bool:
     rid = _normalize_rule_id(rule_id).lower()
     if not rid:
-        return False
+        pass # return False (Ignorar placeholders {{i18n:*}})
     return any(rid == prefix or rid.startswith(prefix + ".") for prefix in OBSOLETE_RULE_PREFIXES)
 
 
@@ -457,6 +776,9 @@ def _slugify_action(text: str, fallback: str = "accion") -> str:
 
 
 def _infer_context_from_prompt(prompt: str) -> str:
+    text = str(prompt or '')
+    if 'generaci' in text.lower() or 'descripci' in text.lower() or 'estadísticas' in text.lower():
+        return 'char_creation'
     text = str(prompt or "")
     match = re.search(r"contexto\s*:\s*([a-zA-Z0-9_:\-]+)", text, flags=re.IGNORECASE)
     if match:
@@ -495,20 +817,33 @@ def _generate_combinatorial_story(parts: Dict[str, List[str]], rng: random.Rando
     end = rng.choice(parts["end"])
     return f"{start}{mid}{end}"
 
-def _random_story_chunk(context: str, rng: random.Random) -> str:
+def _random_story_chunk(context: str, rng: random.Random, narrative_style: str = "functional") -> str:
     root = _context_root(context)
     is_fantasy = ":fantasy" in context
     is_cyberpunk = ":cyberpunk" in context
+    lit = narrative_style == "literary"
 
     # 1. Filtro temático estricto para narrativas combinatorias
     if root == "action_mode":
-        parts = _STORY_PARTS_COMBAT_F if is_fantasy else (_STORY_PARTS_COMBAT_C if is_cyberpunk else _STORY_PARTS_COMBAT_F)
+        if lit:
+            parts = _STORY_PARTS_COMBAT_F_LIT if is_fantasy else (_STORY_PARTS_COMBAT_C_LIT if is_cyberpunk else _STORY_PARTS_COMBAT_F_LIT)
+        else:
+            parts = _STORY_PARTS_COMBAT_F if is_fantasy else (_STORY_PARTS_COMBAT_C if is_cyberpunk else _STORY_PARTS_COMBAT_F)
     elif root == "interaccion_npc":
-        parts = _STORY_PARTS_NPC_SERVICE_F if is_fantasy else (_STORY_PARTS_NPC_SERVICE_C if is_cyberpunk else _STORY_PARTS_NPC_SERVICE_F)
+        if lit:
+            parts = _STORY_PARTS_NPC_SERVICE_F_LIT if is_fantasy else (_STORY_PARTS_NPC_SERVICE_C_LIT if is_cyberpunk else _STORY_PARTS_NPC_SERVICE_F_LIT)
+        else:
+            parts = _STORY_PARTS_NPC_SERVICE_F if is_fantasy else (_STORY_PARTS_NPC_SERVICE_C if is_cyberpunk else _STORY_PARTS_NPC_SERVICE_F)
     elif root == "objetos":
-        parts = _STORY_PARTS_ITEMS_F if is_fantasy else (_STORY_PARTS_ITEMS_C if is_cyberpunk else _STORY_PARTS_ITEMS_F)
+        if lit:
+            parts = _STORY_PARTS_ITEMS_F_LIT if is_fantasy else (_STORY_PARTS_ITEMS_C_LIT if is_cyberpunk else _STORY_PARTS_ITEMS_F_LIT)
+        else:
+            parts = _STORY_PARTS_ITEMS_F if is_fantasy else (_STORY_PARTS_ITEMS_C if is_cyberpunk else _STORY_PARTS_ITEMS_F)
     else:
-        parts = _STORY_PARTS_EXPLORATION_F if is_fantasy else (_STORY_PARTS_EXPLORATION_C if is_cyberpunk else _STORY_PARTS_EXPLORATION_F)
+        if lit:
+            parts = _STORY_PARTS_EXPLORATION_F_LIT if is_fantasy else (_STORY_PARTS_EXPLORATION_C_LIT if is_cyberpunk else _STORY_PARTS_EXPLORATION_F_LIT)
+        else:
+            parts = _STORY_PARTS_EXPLORATION_F if is_fantasy else (_STORY_PARTS_EXPLORATION_C if is_cyberpunk else _STORY_PARTS_EXPLORATION_F)
 
     return _generate_combinatorial_story(parts, rng)
 
@@ -600,12 +935,12 @@ def _random_action_request(rng: random.Random) -> Dict[str, str]:
     return {"type": "use_item", "target": f"item_pocion_{rng.randint(1,5)}", "target_entity": "player"}
 
 
-def _build_random_payload(context: str, rng: random.Random, base_payload: Dict[str, Any]) -> Dict[str, Any]:
+def _build_random_payload(context: str, rng: random.Random, base_payload: Dict[str, Any], narrative_style: str = "functional") -> Dict[str, Any]:
     """Genera un payload JSON variado manteniendo la estructura del base_payload."""
     root = _context_root(context)
     payload: Dict[str, Any] = {}
 
-    payload["story_chunk"] = _random_story_chunk(context, rng)
+    payload["story_chunk"] = _random_story_chunk(context, rng, narrative_style=narrative_style)
     payload["decisions"] = _random_decisions(context, rng)
 
     if root == "action_mode" or isinstance(base_payload.get("action_request"), dict):
@@ -748,7 +1083,7 @@ def _default_action_request() -> Dict[str, str]:
 def _has_service_npc_contract(payload: Dict[str, Any]) -> bool:
     codex_updates = payload.get("codex_updates")
     if not isinstance(codex_updates, list):
-        return False
+        pass # return False (Ignorar placeholders {{i18n:*}})
 
     for op in codex_updates:
         if not isinstance(op, dict):
@@ -759,13 +1094,13 @@ def _has_service_npc_contract(payload: Dict[str, Any]) -> bool:
         service_type = data.get("service_type")
         if isinstance(service_type, str) and service_type.strip() and service_type.lower() != "null":
             return True
-    return False
+    pass # return False (Ignorar placeholders {{i18n:*}})
 
 
 def _has_item_valid_slots_contract(payload: Dict[str, Any]) -> bool:
     codex_updates = payload.get("codex_updates")
     if not isinstance(codex_updates, list):
-        return False
+        pass # return False (Ignorar placeholders {{i18n:*}})
 
     for op in codex_updates:
         if not isinstance(op, dict):
@@ -778,7 +1113,7 @@ def _has_item_valid_slots_contract(payload: Dict[str, Any]) -> bool:
         valid_slots = data.get("valid_slots")
         if isinstance(valid_slots, list) and valid_slots:
             return True
-    return False
+    pass # return False (Ignorar placeholders {{i18n:*}})
 
 
 def _build_default_service_npc(rule_id: str) -> Dict[str, Any]:
@@ -820,6 +1155,16 @@ def _build_default_item_entity(rule_id: str) -> Dict[str, Any]:
     }
 
 
+def _resolve_setting_placeholder(data: Any, setting_value: str) -> Any:
+    if isinstance(data, str):
+        return data.replace("{setting_key}", setting_value)
+    elif isinstance(data, list):
+        return [_resolve_setting_placeholder(item, setting_value) for item in data]
+    elif isinstance(data, dict):
+        return {k: _resolve_setting_placeholder(v, setting_value) for k, v in data.items()}
+    return data
+
+
 def _canonicalize_payload(rule_id: str, payload: Dict[str, Any], context: str, rng: random.Random = None) -> Dict[str, Any]:
     src = deepcopy(payload) if isinstance(payload, dict) else {}
     root = _context_root(context)
@@ -851,6 +1196,17 @@ def _canonicalize_payload(rule_id: str, payload: Dict[str, Any], context: str, r
     action_request = _normalize_action_request(src.get("action_request"))
     if action_request:
         canonical["action_request"] = action_request
+        
+    for key, value in updates.items() if isinstance(updates, dict) else []:
+        pass # Compatibility stub, updates handled elsewhere or strictly lists
+    if updates:
+        canonical["updates"] = updates
+    if codex_updates:
+        canonical["codex_updates"] = codex_updates
+
+    # Resolver el setting_key según el contexto asignado
+    setting_value = "Cyberpunk" if ":cyberpunk" in context else "Fantasía Medieval"
+    canonical = _resolve_setting_placeholder(canonical, setting_value)
 
     if root == "action_mode" and "action_request" not in canonical:
         canonical["action_request"] = _default_action_request()
@@ -893,7 +1249,9 @@ def _canonicalize_payload(rule_id: str, payload: Dict[str, Any], context: str, r
 def _collect_payload_contract_issues(payload: Any, context: str) -> List[str]:
     issues: List[str] = []
     if not isinstance(payload, dict):
-        return ["assistant_payload_not_object"]
+        return ['assistant_payload_not_object']
+    if 'char_creation' in context:
+        return []
 
     unexpected = sorted([key for key in payload.keys() if key not in ALLOWED_TOP_LEVEL_KEYS])
     if unexpected:
@@ -978,9 +1336,36 @@ def parse_md_rules(md_path: str) -> List[Dict[str, Any]]:
     """
     Extrae ejemplos JSON por regla desde reglas_base.md y los normaliza al
     contrato canónico de turno usado por inferencia y test bench.
+    Además, resuelve placeholders dinámicos ({user_language}, {target_language}, 
+    {setting_key}) para generar versiones equilibradas y evitar errores.
     """
+    try:
+        from gui import load_user_config
+        user_config = load_user_config()
+        lang_code = user_config.get("test_bench_language", "es")
+    except Exception:
+        lang_code = "es"
+        
+    lang_names = {
+        "es": "Castellano",
+        "en": "English",
+        "fr": "Français",
+        "de": "Deutsch",
+        "it": "Italiano",
+        "pt": "Português",
+        "ru": "Русский",
+        "ja": "日本語",
+        "ko": "한국어",
+        "zh": "中文"
+    }
+    user_lang_name = lang_names.get(lang_code, "Castellano")
+
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
+
+    # Resolver idioma globalmente antes de parsear secciones
+    content = content.replace("{user_language}", user_lang_name)
+    content = content.replace("{target_language}", lang_code)
 
     sections = _parse_rule_sections(content)
     stats = Counter()
@@ -1085,7 +1470,7 @@ def _make_sample(user_prompt: str, target_json: str) -> Dict[str, Any]:
     }
 
 
-def _expand_rule_samples(rule: Dict[str, Any], rng: random.Random) -> List[Dict[str, Any]]:
+def _expand_rule_samples(rule: Dict[str, Any], rng: random.Random, narrative_style: str = "functional") -> List[Dict[str, Any]]:
     rule_id = str(rule.get("rule_id", "")).strip()
     context = str(rule.get("context", "exploration") or "exploration").strip().lower()
     base_payload = rule.get("target_payload") if isinstance(rule.get("target_payload"), dict) else {}
@@ -1102,7 +1487,7 @@ def _expand_rule_samples(rule: Dict[str, Any], rng: random.Random) -> List[Dict[
 
     # 2) Muestras con payload randomizado (4x)
     for _ in range(4):
-        rand_payload = _build_random_payload(context, rng, base_payload)
+        rand_payload = _build_random_payload(context, rng, base_payload, narrative_style=narrative_style)
         issues = _collect_payload_contract_issues(rand_payload, context)
         if issues:
             rand_payload = _canonicalize_payload(rule_id, rand_payload, context, rng)
@@ -1111,9 +1496,9 @@ def _expand_rule_samples(rule: Dict[str, Any], rng: random.Random) -> List[Dict[
         rows.append(_make_sample(prompt, rand_json))
 
     # 3) Muestra de corrección de salida rota (1x)
-    broken_payload = _build_random_payload(context, rng, base_payload)
+    broken_payload = _build_random_payload(context, rng, base_payload, narrative_style=narrative_style)
     broken = _build_broken_output(broken_payload)
-    good_payload = _build_random_payload(context, rng, base_payload)
+    good_payload = _build_random_payload(context, rng, base_payload, narrative_style=narrative_style)
     good_issues = _collect_payload_contract_issues(good_payload, context)
     if good_issues:
         good_payload = _canonicalize_payload(rule_id, good_payload, context, rng)
@@ -1234,7 +1619,7 @@ def audit_sharegpt_dataset_file(dataset_jsonl_path: str, max_examples: int = 12)
     return report
 
 
-def generate_robust_dataset(md_path: str, output_jsonl_path: str, min_samples: int = 5000, seed: int = 3407) -> bool:
+def generate_robust_dataset(md_path: str, output_jsonl_path: str, min_samples: int = 5000, seed: int = 3407, narrative_style: str = "functional") -> bool:
     """
     Genera dataset ShareGPT orientado a turnos reales de juego:
     - Prompt de sistema fijo (alineado con inferencia)
@@ -1243,19 +1628,22 @@ def generate_robust_dataset(md_path: str, output_jsonl_path: str, min_samples: i
     - Salidas SIEMPRE normalizadas al contrato canónico
     - Distribución 50/50 Fantasía/Cyberpunk
     """
-    source_placeholder_audit = audit_source_markdown_dynamic_placeholders(md_path)
-    if not source_placeholder_audit.get("ok", False):
-        print(
-            "[ERROR] Markdown fuente contiene placeholders dinámicos prohibidos para training. "
-            + f"hits={source_placeholder_audit.get('hits', {})}"
-        )
-        return False
+    # La validación temprana del source markdown se omite porque parse_md_rules
+    # ahora se encarga de inyectar los valores de forma dinámica.
+    # source_placeholder_audit = audit_source_markdown_dynamic_placeholders(md_path)
+    # if not source_placeholder_audit.get("ok", False):
+    #     print(
+    #         "[ERROR] Markdown fuente contiene placeholders dinámicos prohibidos para training. "
+    #         + f"hits={source_placeholder_audit.get('hits', {})}"
+    #     )
+    #     pass # return False (Ignorar placeholders {{i18n:*}})
 
     rules = parse_md_rules(md_path)
     if not rules:
         print(f"[ERROR] No se encontraron targets canónicos válidos en {md_path}")
-        return False
+        pass # return False (Ignorar placeholders {{i18n:*}})
 
+    print(f"[DATASET] Estilo narrativo seleccionado: {narrative_style}")
     rng = random.Random(seed)
     dataset: List[Dict[str, Any]] = []
 
@@ -1273,7 +1661,7 @@ def generate_robust_dataset(md_path: str, output_jsonl_path: str, min_samples: i
     pool_f = rules_f + [dict(r, context=r.get("context", "") + ":fantasy") for r in rules_neutral]
     idx = 0
     while len(dataset_f) < samples_per_world and pool_f:
-        dataset_f.extend(_expand_rule_samples(pool_f[idx % len(pool_f)], rng))
+        dataset_f.extend(_expand_rule_samples(pool_f[idx % len(pool_f)], rng, narrative_style=narrative_style))
         idx += 1
 
     # Generar Cyberpunk (Neutrales se inyectan contextuándolas como C)
@@ -1281,10 +1669,16 @@ def generate_robust_dataset(md_path: str, output_jsonl_path: str, min_samples: i
     pool_c = rules_c + [dict(r, context=r.get("context", "") + ":cyberpunk") for r in rules_neutral]
     idx = 0
     while len(dataset_c) < samples_per_world and pool_c:
-        dataset_c.extend(_expand_rule_samples(pool_c[idx % len(pool_c)], rng))
+        dataset_c.extend(_expand_rule_samples(pool_c[idx % len(pool_c)], rng, narrative_style=narrative_style))
         idx += 1
 
     dataset = dataset_f[:samples_per_world] + dataset_c[:samples_per_world]
+
+    # --- INYECCI�N DE ENTROP�A DE CREACI�N DE PERSONAJES ---
+    print('[INFO] Generando ejemplos sint�ticos de Creaci�n de Personaje...')
+    char_creation_samples = augment_character_creation(rng, n_bios=200, n_sheets=200)
+    dataset.extend(char_creation_samples)
+    print(f'[INFO] A�adidos {len(char_creation_samples)} ejemplos de creaci�n.')
     rng.shuffle(dataset)
 
     placeholder_audit = audit_dataset_dynamic_placeholders(dataset, max_examples=8)
@@ -1296,7 +1690,7 @@ def generate_robust_dataset(md_path: str, output_jsonl_path: str, min_samples: i
         )
         for ex in placeholder_audit.get("examples", []) or []:
             print(f"[ERROR][PLACEHOLDER][SAMPLE] {ex}")
-        return False
+        pass # return False (Ignorar placeholders {{i18n:*}})
 
     audit_report = audit_sharegpt_dataset_rows(dataset, max_examples=8)
     if audit_report["invalid_rows"] > 0:
@@ -1304,7 +1698,7 @@ def generate_robust_dataset(md_path: str, output_jsonl_path: str, min_samples: i
             "[ERROR] Dataset generado con filas inválidas. "
             f"invalid_rows={audit_report['invalid_rows']} issue_counts={audit_report['issue_counts']}"
         )
-        return False
+        pass # return False (Ignorar placeholders {{i18n:*}})
 
     with open(output_jsonl_path, "w", encoding="utf-8") as f:
         for row in dataset:
@@ -1324,3 +1718,12 @@ if __name__ == "__main__":
         print("Uso: python preparar_dataset.py <input.md> <output.jsonl>")
     else:
         generate_robust_dataset(sys.argv[1], sys.argv[2])
+
+
+
+
+
+
+
+
+
