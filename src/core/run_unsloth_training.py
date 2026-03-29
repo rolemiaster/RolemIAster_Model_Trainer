@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import re
 import shutil
 import traceback
 import platform
@@ -516,21 +517,36 @@ def run_training(model_id_or_path, dataset_path, output_dir, params):
             ),
         )
 
-        # --- TRAIN ON RESPONSES ONLY ---
-        # Enmascarar system prompt y user prompt en la función de loss
-        # Usamos los tokens ChatML reales producidos por apply_chat_template en Qwen
-        try:
-            from unsloth.chat_templates import train_on_responses_only
-            trainer = train_on_responses_only(
-                trainer,
-                instruction_part = "<|im_start|>user\n",
-                response_part = "<|im_start|>assistant\n",
-            )
-            print("[UNSLOTH] 'train_on_responses_only' activado: el loss solo se calculará sobre el output JSON.")
-        except ImportError:
-            print("[WARN] No se pudo importar 'train_on_responses_only' de unsloth. Entrenando sobre toda la secuencia.")
-        except Exception as e:
-            print(f"[WARN] Error al configurar 'train_on_responses_only': {e}")
+        # --- TRAIN ON RESPONSES ONLY (condicional por tamaño) ---
+        # Modelos pequeños (≤3B) necesitan la señal completa del loss (system+user+assistant)
+        # para aprender patrones complejos como multi-entidad JSON.
+        # Modelos 4B+ se benefician del entrenamiento enfocado solo en respuestas.
+        # Evidencia: Experimentos aislados 2B vs 4B (Mar 2026).
+        _toro_param = str(params.get("train_on_responses", "")).strip().lower()
+        if _toro_param in ("on", "off"):
+            _use_toro = _toro_param == "on"
+        else:
+            # Fallback: auto-detectar por tamaño del modelo
+            _model_name_lower = str(model_id_or_path).lower()
+            _size_match = re.search(r'(\d+\.?\d*)b', _model_name_lower)
+            _param_billions = float(_size_match.group(1)) if _size_match else 4.0
+            _use_toro = _param_billions >= 4.0
+
+        if _use_toro:
+            try:
+                from unsloth.chat_templates import train_on_responses_only
+                trainer = train_on_responses_only(
+                    trainer,
+                    instruction_part = "<|im_start|>user\n",
+                    response_part = "<|im_start|>assistant\n",
+                )
+                print("[UNSLOTH] 'train_on_responses_only' activado: loss solo sobre respuestas del assistant.")
+            except ImportError:
+                print("[WARN] No se pudo importar 'train_on_responses_only' de unsloth. Entrenando sobre toda la secuencia.")
+            except Exception as e:
+                print(f"[WARN] Error al configurar 'train_on_responses_only': {e}")
+        else:
+            print("[UNSLOTH] 'train_on_responses_only' OMITIDO: loss sobre secuencia completa (system+user+assistant).")
         # -------------------------------
 
         # 6. Entrenar

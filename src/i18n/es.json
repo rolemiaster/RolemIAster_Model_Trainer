@@ -25,6 +25,10 @@
     "narrative_style_literary": "Literario (Recomendado ≤8B)",
     "narrative_style_functional": "Funcional (Recomendado 9B+)",
     "narrative_style_tooltip": "Controla la calidad de la prosa generada en los story_chunk del dataset.\n'Literario' inyecta descripciones ricas para compensar la menor capacidad latente de modelos pequeños.\n'Funcional' usa frases directas, dejando que modelos grandes usen su creatividad innata.",
+    "train_on_responses_label": "Loss de Entrenamiento:",
+    "train_on_responses_on": "Solo Respuestas (Recomendado 4B+)",
+    "train_on_responses_off": "Secuencia Completa (Recomendado <4B)",
+    "train_on_responses_tooltip": "Controla si el loss se calcula solo sobre las respuestas del assistant (JSON) o sobre toda la secuencia (system+user+assistant).\nModelos pequeños (<4B) necesitan la señal completa para aprender patrones complejos.\nModelos 4B+ se benefician del enfoque solo en respuestas.",
     "engine_label": "Motor de Ejecución (GGUF/Export):",
     "engine_auto": "Automático (Detectar)",
     "engine_cuda": "NVIDIA (CUDA)",
@@ -251,5 +255,10 @@
     "tb_queue_model_done": "[COLA] {model} → completado. Reporte exportado.",
     "tb_queue_model_error": "[COLA] {model} → error: {error}",
     "tb_queue_item_format": "[{status}] {model}",
-    "tb_queue_select_title": "Selecciona modelos GGUF para la cola"
+    "tb_queue_select_title": "Selecciona modelos GGUF para la cola",
+    "generate_dataset_btn": "Generar Dataset",
+    "log_dataset_error": "Error al generar dataset",
+    "dlg_dataset_generated": "Dataset generado correctamente.",
+    "dlg_dataset_failed": "Error al generar el dataset.",
+    "dlg_no_md_file": "Selecciona primero un archivo de reglas (.md)"
 }

@@ -584,7 +584,7 @@ _NPC_NAMES_C = [
 _NPC_NAMES = _NPC_NAMES_F + _NPC_NAMES_C
 
 _ITEM_TEMPLATES_F = [
-    ("Espada de Acero", "weapon", ["weapon_right", "backpack"]),
+    ("Espada de Acero", "weapon", ["weapon_right", "weapon_left", "backpack"]),
     ("Escudo Roble", "armor", ["weapon_left", "backpack"]),
     ("Yelmo de Hierro", "armor", ["head", "backpack"]),
     ("Cota de Malla", "armor", ["torso", "backpack"]),
@@ -593,12 +593,12 @@ _ITEM_TEMPLATES_F = [
 ]
 
 _ITEM_TEMPLATES_C = [
-    ("Pistola Ligera", "weapon", ["weapon_right", "belt"]),
+    ("Pistola Ligera", "weapon", ["weapon_right", "weapon_left", "backpack"]),
     ("Chaleco Kevlar", "armor", ["torso", "backpack"]),
-    ("Implante Óptico", "implant", ["head"]),
+    ("Implante Óptico", "implant", ["implant_head"]),
     ("Subfusil", "weapon", ["two_hands", "backpack"]),
     ("Estimulante Combate", "consumable", ["belt", "backpack"]),
-    ("Katana Térmica", "weapon", ["weapon_right", "backpack"]),
+    ("Katana Térmica", "weapon", ["weapon_right", "weapon_left", "backpack"]),
 ]
 
 _ITEM_TEMPLATES = _ITEM_TEMPLATES_F + _ITEM_TEMPLATES_C
@@ -775,6 +775,38 @@ def _slugify_action(text: str, fallback: str = "accion") -> str:
     return base or fallback
 
 
+def _get_icon_for_item(name: str, item_type: str) -> str:
+    name_lower = name.lower()
+    type_lower = item_type.lower()
+
+    icon_map = {
+        "weapon": {
+            "espada": "⚔️", "espada de acero": "⚔️", "katana": "🗡️", "cuchillo": "🔪",
+            "hacha": "🪓", "arco": "🏹", "pistola": "🔫", "rifle": "🔫",
+            "subfusil": "🔫", "escopeta": "🔫", "lanza": "🔱", "daga": "🔪",
+        },
+        "armor": {
+            "escudo": "🛡️", "yelmo": "🪖", "casco": "🪖", "armadura": "👕",
+            "cota": "👕", "chaleco": "👕", "botas": "👢", "guantes": "🧤",
+            "capa": "🧥", "amuleto": "💍", "anillo": "💎",
+        },
+        "potion": {"poción": "🧪", "pocion": "🧪", "elixir": "🧪"},
+        "consumable": {"estimulante": "🧪", "antidoto": "🧪", "bebida": "🧃"},
+        "implant": {"implante": "⚙️", "óptico": "👁️", "brazo": "🦾", "pierna": "🦿"},
+    }
+
+    if type_lower in icon_map:
+        for key, icon in icon_map[type_lower].items():
+            if key in name_lower:
+                return icon
+
+    default_icons = {
+        "weapon": "🗡️", "armor": "🛡️", "potion": "🧪",
+        "consumable": "🧪", "implant": "⚙️", "item": "📦"
+    }
+    return default_icons.get(type_lower, "📦")
+
+
 def _infer_context_from_prompt(prompt: str) -> str:
     text = str(prompt or '')
     if 'generaci' in text.lower() or 'descripci' in text.lower() or 'estadísticas' in text.lower():
@@ -884,6 +916,10 @@ def _random_npc(context: str, rng: random.Random) -> Dict[str, Any]:
     pool = _NPC_NAMES_F if is_fantasy else (_NPC_NAMES_C if is_cyberpunk else _NPC_NAMES_F + _NPC_NAMES_C)
     name, prof, gender = rng.choice(pool)
     npc_id = f"npc_{_slugify_action(name, 'npc')}"
+
+    stock_count = rng.randint(5, 10)
+    stock_item_ids = [f"item_{prof}_{i+1}" for i in range(stock_count)]
+
     return {
         "npc_id": npc_id,
         "operation": "add_entity",
@@ -894,8 +930,33 @@ def _random_npc(context: str, rng: random.Random) -> Dict[str, Any]:
             "gender": gender,
             "profession": prof,
             "service_type": prof,
+            "stock": stock_item_ids,
         },
     }
+
+
+def _generate_stock_items(npc_prof: str, stock_item_ids: List[str], context: str, rng: random.Random) -> List[Dict[str, Any]]:
+    is_fantasy = ":fantasy" in context
+    is_cyberpunk = ":cyberpunk" in context
+    pool = _ITEM_TEMPLATES_F if is_fantasy else (_ITEM_TEMPLATES_C if is_cyberpunk else _ITEM_TEMPLATES_F + _ITEM_TEMPLATES_C)
+
+    items = []
+    for item_id in stock_item_ids:
+        name, item_type, slots = rng.choice(pool)
+        icon = _get_icon_for_item(name, item_type)
+        items.append({
+            "operation": "add_entity",
+            "entity_id": item_id,
+            "entity_type": "item",
+            "data": {
+                "name": name,
+                "icon": icon,
+                "type": item_type,
+                "valid_slots": list(slots),
+                "container_id": f"npc_{_slugify_action(npc_prof, 'npc')}",
+            },
+        })
+    return items
 
 
 def _random_item(context: str, rng: random.Random) -> Dict[str, Any]:
@@ -905,6 +966,7 @@ def _random_item(context: str, rng: random.Random) -> Dict[str, Any]:
     pool = _ITEM_TEMPLATES_F if is_fantasy else (_ITEM_TEMPLATES_C if is_cyberpunk else _ITEM_TEMPLATES_F + _ITEM_TEMPLATES_C)
     name, item_type, slots = rng.choice(pool)
     item_id = f"item_{_slugify_action(name, 'item')}"
+    icon = _get_icon_for_item(name, item_type)
     return {
         "item_id": item_id,
         "operation": "add_entity",
@@ -912,6 +974,7 @@ def _random_item(context: str, rng: random.Random) -> Dict[str, Any]:
         "entity_type": "item",
         "data": {
             "name": name,
+            "icon": icon,
             "type": item_type,
             "valid_slots": list(slots),
         },
@@ -949,7 +1012,13 @@ def _build_random_payload(context: str, rng: random.Random, base_payload: Dict[s
     if root == "interaccion_npc" or _has_service_npc_contract({"codex_updates": base_payload.get("codex_updates", [])}):
         npc = _random_npc(context, rng)
         npc_id = npc.pop("npc_id")
-        payload["codex_updates"] = [npc]
+        stock_item_ids = npc.get("data", {}).get("stock", [])
+        npc_prof = npc.get("data", {}).get("profession", "vendedor")
+        
+        # Generar items del stock
+        stock_items = _generate_stock_items(npc_prof, stock_item_ids, context, rng)
+        
+        payload["codex_updates"] = [npc] + stock_items
         payload["service_offer"] = {"npc_id": npc_id}
 
     if root == "objetos" or _has_item_valid_slots_contract({"codex_updates": base_payload.get("codex_updates", [])}):
@@ -1126,6 +1195,9 @@ def _build_default_service_npc(rule_id: str) -> Dict[str, Any]:
     name, prof, desc = random.choice(professions)
     
     npc_id = f"npc_servicio_{_slugify_action(rule_id or 'base', 'base')}"
+    stock_count = random.randint(5, 10)
+    stock_item_ids = [f"item_{prof}_{i+1}" for i in range(stock_count)]
+    
     return {
         "operation": "add_entity",
         "entity_id": npc_id,
@@ -1136,20 +1208,23 @@ def _build_default_service_npc(rule_id: str) -> Dict[str, Any]:
             "service_type": prof,
             "description": desc,
             "container_id": "loc_base",
+            "stock": stock_item_ids,
         }
     }
 
 
 def _build_default_item_entity(rule_id: str) -> Dict[str, Any]:
     item_id = f"item_equipable_{_slugify_action(rule_id or 'base', 'base')}"
+    icon = _get_icon_for_item("Objeto equipable", "weapon")
     return {
         "operation": "add_entity",
         "entity_id": item_id,
         "entity_type": "item",
         "data": {
             "name": "Objeto equipable",
-            "type": "item",
-            "valid_slots": ["weapon_right", "backpack"],
+            "icon": icon,
+            "type": "weapon",
+            "valid_slots": ["weapon_right", "weapon_left", "backpack"],
             "description": "Item de referencia para contrato técnico de equipamiento.",
         },
     }
@@ -1216,11 +1291,28 @@ def _canonicalize_payload(rule_id: str, payload: Dict[str, Any], context: str, r
     if rule_id == "5.4" and rng.random() < 0.4:
         canonical["story_chunk"] = "Intento procesar tu solicitud, pero el sistema restringe la creacion masiva simultanea. He generado un grupo inicial para mantener la estabilidad."
         npcs = [_random_npc(context, rng) for _ in range(rng.randint(2, 3))]
-        canonical["codex_updates"] = npcs
+        # Generar los items del stock para cada NPC
+        all_updates = []
+        for npc in npcs:
+            npc_data = npc.get("data", {})
+            stock_ids = npc_data.get("stock", [])
+            prof = npc_data.get("profession", "vendedor")
+            all_updates.append(npc)
+            if stock_ids:
+                all_updates.extend(_generate_stock_items(prof, stock_ids, context, rng))
+        canonical["codex_updates"] = all_updates
         return canonical
 
     if root == "interaccion_npc" and not _has_service_npc_contract({"codex_updates": codex_updates}):
-        codex_updates.append(_build_default_service_npc(rule_id))
+        default_npc = _build_default_service_npc(rule_id)
+        stock_ids = default_npc.get("data", {}).get("stock", [])
+        prof = default_npc.get("data", {}).get("profession", "vendedor")
+        # Generar items del stock
+        if stock_ids:
+            codex_updates.append(default_npc)
+            codex_updates.extend(_generate_stock_items(prof, stock_ids, context, rng))
+        else:
+            codex_updates.append(default_npc)
 
     if root == "interaccion_npc" and "service_offer" not in canonical:
         npc_id = ""
@@ -1237,6 +1329,60 @@ def _canonicalize_payload(rule_id: str, payload: Dict[str, Any], context: str, r
 
     if root == "objetos" and not _has_item_valid_slots_contract({"codex_updates": codex_updates}):
         codex_updates.append(_build_default_item_entity(rule_id))
+
+    # --- INYECCIÓN DINÁMICA DE SEGURIDAD PARA ITEMS ---
+    # Reparar proactivamente cualquier item que venga sin valid_slots (ej. de los ejemplos estáticos)
+    # y asegurar que cualquier NPC con stock tenga sus items generados.
+    
+    # 1. Recopilar todos los IDs de items existentes
+    existing_item_ids = set()
+    for op in codex_updates:
+        if isinstance(op, dict) and op.get("entity_type") == "item":
+            existing_item_ids.add(op.get("entity_id", ""))
+            
+    # 2. Iterar sobre todos los updates y reparar
+    new_stock_items = []
+    for op in codex_updates:
+        if not isinstance(op, dict):
+            continue
+            
+        # Reparar items sin valid_slots
+        if op.get("entity_type") == "item":
+            data = op.get("data", {})
+            if isinstance(data, dict):
+                slots = data.get("valid_slots")
+                item_type = data.get("type", "item")
+                # Si no tiene valid_slots o está vacío (y no es un implante que a veces puede variar)
+                if not isinstance(slots, list) or len(slots) == 0:
+                    # Inyectar slots lógicos según el tipo para evitar ejemplos rotos
+                    if item_type == "weapon":
+                        data["valid_slots"] = rng.choice([["weapon_right", "weapon_left", "backpack"], ["two_hands", "backpack"]])
+                    elif item_type == "armor":
+                        data["valid_slots"] = rng.choice([["torso", "backpack"], ["head", "backpack"], ["weapon_left", "backpack"]])
+                    elif item_type == "potion" or item_type == "consumable":
+                        data["valid_slots"] = ["belt", "backpack"]
+                    elif item_type == "implant":
+                        data["valid_slots"] = [rng.choice(["implant_head", "implant_arm_right", "implant_nervous"])]
+                    else:
+                        data["valid_slots"] = ["backpack"]
+                        
+        # Asegurar que NPCs con stock tienen sus items
+        if op.get("entity_type") == "npc":
+            data = op.get("data", {})
+            if isinstance(data, dict):
+                stock_ids = data.get("stock", [])
+                prof = data.get("profession", "vendedor")
+                if isinstance(stock_ids, list) and stock_ids:
+                    # Filtrar los IDs de stock que NO existen en codex_updates
+                    missing_stock_ids = [sid for sid in stock_ids if sid not in existing_item_ids]
+                    if missing_stock_ids:
+                        new_stock_items.extend(_generate_stock_items(prof, missing_stock_ids, context, rng))
+                        # Actualizar el set para evitar duplicados si hay múltiples NPCs
+                        existing_item_ids.update(missing_stock_ids)
+
+    # Añadir los items de stock faltantes
+    if new_stock_items:
+        codex_updates.extend(new_stock_items)
 
     if codex_updates:
         canonical["codex_updates"] = codex_updates
@@ -1674,11 +1820,11 @@ def generate_robust_dataset(md_path: str, output_jsonl_path: str, min_samples: i
 
     dataset = dataset_f[:samples_per_world] + dataset_c[:samples_per_world]
 
-    # --- INYECCI�N DE ENTROP�A DE CREACI�N DE PERSONAJES ---
-    print('[INFO] Generando ejemplos sint�ticos de Creaci�n de Personaje...')
-    char_creation_samples = augment_character_creation(rng, n_bios=200, n_sheets=200)
-    dataset.extend(char_creation_samples)
-    print(f'[INFO] A�adidos {len(char_creation_samples)} ejemplos de creaci�n.')
+    # --- INYECCIÓN DE ENTROPÍA DE CREACIÓN DE PERSONAJES ---
+    # DESACTIVADO: Los 400 samples sintéticos (200 bios + 200 sheets) diluyen la capacidad
+    # de modelos pequeños/medianos para aprender patrones complejos (rule_07: NPC + item).
+    # Exp3 (Mar 2026): sin augmenter, rule_07 mejoró en 2B (-20 fallos) y 4B (-7 fallos),
+    # mientras que rule_01 (char_creation) sigue en 0 fallos sin el augmenter.
     rng.shuffle(dataset)
 
     placeholder_audit = audit_dataset_dynamic_placeholders(dataset, max_examples=8)

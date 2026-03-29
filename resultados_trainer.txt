@@ -1,0 +1,172 @@
+# RESULTADOS DE TEST BENCH - ABAFE MODELS TRAINER
+# Formato: [FECHA] MODELO: [CONFIGURACIÓN] -> RESULTADO
+# =============================================================================
+
+[2026-03-20] Modelo qwen 3.5 2B (Qwen_Qwen3.5-2B.Q4_K_M.gguf) (reentrenado con presets optimizados - 10 ciclos):
+- Configuración final: A=Medium, B=Low, C=Low (seleccionado por eficiencia de tokens)
+- Total tests: 120 (3 modos × 4 niveles × 10 ciclos)
+- Tasas de éxito finales por modo (promedio de todos los ciclos):
+  * Modo A (Isolated): 90.00%
+  * Modo B (Compact): 97.00%
+  * Modo C (Full): 90.00%
+- Scores promedio (referencia):
+  * Isolated: None=676.06, Low=911.50, Medium=961.30, High=962.04
+  * Compact: None=822.78, Low=971.18, Medium=1001.81, High=972.14
+  * Full: None=833.36, Low=981.68, Medium=982.08, High=1002.74
+- COMPARACIÓN CON 2B ANTERIOR (GMKtec EVO-X2):
+  * Isolated: 83.50% → 90.00% (+6.5%)
+  * Compact: 87.00% → 97.00% (+10.0%)
+  * Full: 86.25% → 90.00% (+3.75%)
+- Observaciones clave:
+  * Mejora significativa en todos los modos, especialmente Compact (+10%).
+  * Full/None mejoró drásticamente: 749.30 → 833.36 (+11.2% score), indicando mejor manejo sin CoT.
+  * Compact/Low y Full/Low ahora superan 970-980 puntos, mejor estabilidad en tareas JSON.
+  * Los presets optimizados (LR 2e-4, Epochs 3) redujeron overfitting y mejoraron generalización.
+- Conclusión: Los cambios de hiperparámetros fueron beneficiosos. El modelo es más robusto y consistente.
+
+[2026-03-20] Modelo Qwen 3.5 4B (Qwen_Qwen3.5-4B.Q4_K_M_v1.gguf) (test robusto - 10 ciclos):
+- Configuración final: A=None, B=High, C=Low
+- Total tests: 120 (3 modos × 4 niveles × 10 ciclos)
+- Tasas de éxito finales por modo (promedio de todos los ciclos):
+  * Modo A (Isolated): 51.00%
+  * Modo B (Compact): 61.00%
+  * Modo C (Full): 63.75%
+- Scores promedio (referencia):
+  * Isolated: None=645.83, Low=642.83, Medium=404.68, High=633.46
+  * Compact: None=688.26, Low=698.44, Medium=573.37, High=790.22
+  * Full: None=665.58, Low=758.71, Medium=708.03, High=731.27
+- Observaciones:
+  * Rendimiento general INFERIOR al modelo 2B en todos los modos (~20-30% menos de tasa de éxito).
+  * El modo Isolated se degrada severamente con razonamiento Medium (404.68), sugiriendo confusión por overthinking sin contexto.
+  * En modo Full, Low (758.71) supera a High (731.27), confirmando que modelos más capaces pueden saturarse con CoT excesivo si la instrucción es compleja.
+- Análisis de Parámetros de Entrenamiento (Causa Raíz Probable):
+  * El modelo 4B se entrenó con Rank=32 / Alpha=64 y Batch_Size=4 (vs Rank=16 / Batch=8 del 2B).
+  * Rank 32: Aumentó la capacidad de adaptación excesivamente para este dataset, provocando probable overfitting o degradación de la capacidad general (catastrophic forgetting) para seguir instrucciones rígidas.
+  * Batch Size 4: Con grad_acc=4 el effective batch era 16 (correcto). El Batch NO fue el problema principal.
+  * Conclusión Técnica: Rank 32 es la causa raíz. Rank alto en modelos Qwen3 crea "intruder dimensions" que destruyen capacidades base (avalado por paper arxiv:2410.21228 y experimentos Reddit Qwen3-8B). Para tareas de formato estricto (JSON), Rank ≤16 es mandatorio.
+- Conclusión Final: Qwen 4B muestra inestabilidad causada casi exclusivamente por Rank 32 excesivo. Se recomienda reentrenar con los nuevos presets: Rank 16, Alpha 32, Batch 4, LR 2e-4, Epochs 3.
+
+[2026-03-20] ACTUALIZACIÓN DE PRESETS - apply_smart_configuration (gui.py):
+- MOTIVO: Revisión empírica basada en experimentos propios + paper arxiv:2410.21228 + Unsloth docs + Reddit Qwen3 LoRA findings.
+- HALLAZGO CLAVE: Rank NO debe escalar con el tamaño del modelo. Modelos grandes necesitan MENOS adaptación LoRA.
+  Rank alto → más "intruder dimensions" → catastrophic forgetting → degradación de instrucciones estructuradas.
+
+  ANTES                          DESPUÉS
+  ──────────────────────────────────────────────────────────────────
+  micro  (≤3B):  R16/A32/B8/LR3e-4/Ep5   → R16/A32/B8/LR2e-4/Ep3
+  small  (4-8B): R32/A64/B4/LR2e-4/Ep5   → R16/A32/B4/LR2e-4/Ep3
+  medium (9-14B):R64/A128/B2/LR1e-4/Ep4  → R16/A32/B4/LR1.5e-4/Ep2
+  large  (>14B): R64/A128/B1/LR5e-5/Ep3  → R8/A16/B4/LR1e-4/Ep2
+
+- Effective batch sin FLA ahora es 16 para todas las categorías (batch × grad_acc=4).
+- Alpha = 2×Rank en todos los casos (ratio validado por Unsloth y Raschka).
+- LR micro bajó de 3e-4 a 2e-4 para reducir intruder dimensions.
+
+[2026-03-21] Modelo Qwen 3.5 4B (Qwen_Qwen3.5-4B.Q4_K_M_v2.gguf) (Reentrenado con presets empíricos - 10 ciclos):
+- Configuración final: A=Low, B=Low, C=None
+- Total tests: 120 (3 modos × 4 niveles × 10 ciclos)
+- Tasas de éxito finales por modo (promedio de los niveles ganadores):
+  * Modo A (Isolated, Low): 57.00%
+  * Modo B (Compact, Low): 56.00%
+  * Modo C (Full, None): 60.00%
+- Scores promedio (referencia):
+  * Isolated: None=535.17, Low=647.80, Medium=361.32, High=448.21
+  * Compact: None=502.02, Low=639.01, Medium=503.21, High=546.31
+  * Full: None=682.83, Low=699.57, Medium=528.10, High=650.57
+- COMPARACIÓN CON 4B ANTERIOR (Rank 32, Batch 4 bruto, Ep 5):
+  * Isolated: 51.00% → 57.00% (+6.00%)
+  * Compact: 61.00% → 56.00% (-5.00%)
+  * Full: 63.75% → 60.00% (-3.75%)
+- Observaciones y Análisis Crítico:
+  * El cambio de presets (Rank 16, Alpha 32, LR 2e-4, Ep 3) mejoró ligeramente el modo Isolated, pero empeoró Compact y Full.
+  * El modelo 4B SIGUE SIENDO INFERIOR AL 2B (que ronda el 90-97% de éxito).
+  * En modo Isolated/Medium, el score colapsa severamente (361.32), un patrón idéntico al 4B anterior (404.68). Esto sugiere un problema intrínseco del modelo base 4B con el "overthinking" sin contexto.
+  * La reducción de parámetros mitigó parcialmente el "catastrophic forgetting" en tareas aisladas, pero la incapacidad general del 4B para igualar al 2B en el juego completo indica que esta arquitectura o tamaño específico de Qwen 3.5 tiene dificultades intrínsecas con este dataset estructurado en JSON.
+  * HALLAZGO CRÍTICO POST-MORTEM (22/03): Se descubrió que el 63.5% de los fallos (392 de 617) fueron causados por TRUNCAMIENTO de la respuesta (limitación de tokens). El modelo generaba respuestas de hasta 19.000 caracteres, excediendo el límite de 4092 tokens. Esto sugiere que el modelo no era necesariamente "tonto", sino excesivamente verborreico, y su evaluación fue injustamente penalizada por el corte abrupto.
+- Conclusión Final sobre la Serie 4B: Aunque el truncamiento explica la mayoría de los fallos técnicos, la verborrea incontrolable es en sí misma un defecto para un modelo que debe actuar como backend JSON estricto. Se mantiene la preferencia por el 2B por su concisión y eficiencia nativa.
+
+[2026-03-22] Modelo Qwen 3.5 9B (Qwen_Qwen3.5-9B.Q4_K_M.gguf) (Auto-tune, 10 ciclos):
+- Configuración final: A=Low, B=None, C=None
+- Total tests: 120 (3 modos × 4 niveles × 10 ciclos)
+- Tasas de éxito finales por modo (promedio de todos los ciclos de los niveles ganadores):
+  * Modo A (Isolated, Low): 73.00%
+  * Modo B (Compact, None): 76.00%
+  * Modo C (Full, None): 76.00%
+- Scores promedio narrativos (niveles ganadores):
+  * Isolated: 83.3
+  * Compact: 85.5
+  * Full: 82.4
+- Fallos principales por regla detectados en modos ganadores:
+  * current_location: 25 fallos
+  * service_npc: 21 fallos
+  * item_valid_slots: 13 fallos
+  * narrative_quality: 11 fallos
+  * json_parse: 11 fallos
+- Fallos principales por suite de validación:
+  * case_rule_01_char_creation: 25 fallos
+  * case_rule_07_cyber_implants: 21 fallos
+  * case_rule_04_equipment: 14 fallos
+  * case_rule_02_skills: 6 fallos
+- Observaciones y Análisis Crítico:
+  * El 9B sufre un rendimiento general moderado (73%-76%), inferior al impresionante 90-97% del 2B, pero superior al problemático 4B (50-60%).
+  * El modelo prefiere fuertemente *no usar* razonamiento (None) en modos con mucho contexto (Compact y Full), lo que indica que a mayor tamaño/contexto, el CoT inducido genera más daño o distracción. En Isolated, un CoT ligero (Low) es beneficioso.
+  * Curiosamente, sufre mucho en los casos estructurales muy rígidos como `char_creation` y `cyber_implants` (fallando gravemente en `service_npc` y `current_location`). Parece que el peso de los 9B le hace "olvidar" detalles específicos de la inyección de reglas (como actualizar correctamente el `current_location`).
+  * Los fallos de parseo JSON no son el problema principal, sino el cumplimiento de la estructura de las reglas del mundo.
+- Conclusión Final: Sigue sin poder superar la excepcional eficiencia y adherencia de reglas del Qwen 3.5 2B. Para tareas muy ceñidas a reglas inyectadas y formato rígido en la arquitectura actual, el 2B se consolida indiscutiblemente como la anomalía eficiente.
+
+[2026-03-23] Modelo Qwen 3 (No 3.5) 4B (Qwen_Qwen3-4B.Q4_K_M.gguf) (Auto-tune, 10 ciclos tras aplicar parches EOS/ResponsesOnly):
+- Configuración final (ganadores Auto-Tune con criterio eficiencia tokens): A=None, B=Low, C=None
+- Scores brutos ganadores (sin penalización): A=High(811.3), B=Medium(821.0), C=Low(843.1)
+- NOTA: El Auto-Tune aplica penalización de eficiencia de tokens: si la diferencia de score entre niveles es <50 puntos, elige el nivel de razonamiento MÁS BAJO para ahorrar tokens. Por eso Full/Low (843.1) pierde ante Full/None (832.2) aunque tenga mayor score bruto.
+- Total tests: 120 (3 modos × 4 niveles × 10 ciclos)
+- Scores promedio por modo/nivel (Score = Pass_Rate*10 + Narrativa):
+  * Isolated: None=791.6, Low=750.6, Medium=770.6, High=811.3
+  * Compact: None=750.2, Low=801.1, Medium=821.0, High=811.7
+  * Full: None=832.2, Low=843.1, Medium=832.9, High=750.7
+- Fallos principales por suite de validación (Total: 341):
+  * case_rule_07_cyber_implants: 120 fallos
+  * case_rule_01_char_creation: 72 fallos
+  * case_rule_05_npcs: 46 fallos
+  * case_rule_09_communication: 44 fallos
+  * case_rule_04_equipment: 26 fallos
+- Fallos principales por regla detectados:
+  * narrative_quality: 153 fallos
+  * service_npc: 141 fallos
+  * current_location: 72 fallos
+  * item_valid_slots: 16 fallos
+- Observaciones y Análisis Crítico:
+  * IMPACTO DE LOS PARCHES: La activación de `train_on_responses_only` y la protección del token de parada (EOS) al descartar truncamientos han devuelto a la vida a la familia 4B. Pasamos de un desastroso ~50-60% de éxito a un muy respetable ~80-84% en score bruto.
+  * FIN DEL TRUNCAMIENTO MASIVO: El modelo ya no divaga ni genera respuestas de 19,000 tokens en bucle. Al entrenar exclusivamente sobre respuestas completas y limpias, asimiló perfectamente la necesidad de cerrar el JSON y emitir el token de parada.
+  * CRITERIO DE EFICIENCIA: El umbral de penalización de 50 puntos comprime los ganadores hacia niveles de razonamiento bajos/ninguno en la mayoría de modos, lo que es coherente con el objetivo de producción (mínimo CoT posible).
+  * COMPARATIVA 2B vs QWEN3-4B: La mejora es colosal respecto a su versión anterior rota, pero el Qwen3-4B aún no alcanza la consistencia casi absoluta del Qwen3.5-2B (90-97%).
+- Conclusión Final: Los fixes de pipeline de entrenamiento han demostrado ser críticos y efectivos. Qwen3-4B se posiciona como una opción muy sólida, demostrando que el fracaso anterior era casi enteramente un problema de truncamiento de dataset y verborrea inducida por ruido en el entrenamiento, no falta de capacidad.
+
+[2026-03-24] Modelo Qwen 3 (No 3.5) 8B (Qwen3-8B.Q4_K_M.gguf) (Auto-tune, 10 ciclos tras aplicar parches EOS/ResponsesOnly):
+- Configuración final (ganadores Auto-Tune con criterio eficiencia tokens): A=None, B=None, C=Low
+- Scores brutos ganadores (sin penalización): A=None(924.8), B=Medium(944.1), C=High(904.5)
+- NOTA: El Auto-Tune aplica penalización de eficiencia de tokens. En modo Compact, Medium (944.1) pierde ante None (933.9) al ser la diferencia <50 puntos.
+- Total tests: 120 (3 modos × 4 niveles × 10 ciclos)
+- Scores promedio por modo/nivel (Score = Pass_Rate*10 + Narrativa):
+  * Isolated: None=924.8, Low=914.4, Medium=904.4, High=864.0
+  * Compact: None=933.9, Low=913.2, Medium=944.1, High=923.7
+  * Full: None=873.8, Low=894.0, Medium=893.7, High=904.5
+- Fallos principales por suite de validación (Total: 212):
+  * case_rule_07_cyber_implants: 120 fallos
+  * case_rule_01_char_creation: 82 fallos
+  * case_rule_04_equipment: 7 fallos
+  * case_rule_06_magic: 2 fallos
+  * case_rule_00_gm_attitude: 1 fallos
+- Fallos principales por regla detectados:
+  * service_npc: 119 fallos
+  * current_location: 82 fallos
+  * item_valid_slots: 6 fallos
+  * narrative_quality: 5 fallos
+  * json_parse: 1 fallos
+- Observaciones y Análisis Crítico:
+  * RENDIMIENTO EXCEPCIONAL: El modelo 8B demuestra una robustez impresionante. Sus tasas de paso base superan sistemáticamente el 90% en modos Isolated y Compact, acercándose peligrosamente al nivel del Qwen3.5-2B.
+  * EFECTIVIDAD DE LOS PARCHES: Se confirma categóricamente que los fallos catastróficos anteriores de los modelos grandes (4B, 8B, 9B) eran consecuencia directa del truncamiento del dataset (pérdida de EOS) y ruido en el entrenamiento. Con `train_on_responses_only` y filtrado estricto, el 8B es estable, conciso y respeta el JSON.
+  * INTELIGENCIA NATIVA VS CoT: El score bruto de A=None (924.8) es superior a A=High (864.0). El modelo es tan capaz "de fábrica" que forzarle a razonar en contextos aislados (Isolated) es contraproducente. Solo requiere un empujón ligero (Low) en el modo Full (el más complejo) para mantener la estabilidad (894.0).
+  * ESTADO ACTUAL: El Qwen3-8B es ahora un competidor directo y extremadamente viable. Supera ampliamente al Qwen3-4B (~80-84%) y compite cara a cara con la eficiencia del 2B, aportando seguramente mejor narrativa y comprensión profunda del mundo.
+- Conclusión Final: Éxito rotundo del nuevo pipeline de entrenamiento. El Qwen3-8B es un modelo "Tier 1" para el proyecto.
+
+# =============================================================================

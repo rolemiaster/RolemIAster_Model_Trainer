@@ -1,0 +1,30 @@
+FATAL GUI ERROR: name 'running' is not defined
+Traceback (most recent call last):
+  File "D:\PROGRAMACION\ABAFE_Models_Trainer\src\gui.py", line 2266, in <module>
+    window = LoRATrainerGUI()
+             ^^^^^^^^^^^^^^^^
+  File "D:\PROGRAMACION\ABAFE_Models_Trainer\src\gui.py", line 256, in __init__
+    self.init_ui()
+  File "D:\PROGRAMACION\ABAFE_Models_Trainer\src\gui.py", line 431, in init_ui
+    self.init_test_bench_tab()
+  File "D:\PROGRAMACION\ABAFE_Models_Trainer\src\gui.py", line 854, in init_test_bench_tab
+    self.update_test_bench_status()
+  File "D:\PROGRAMACION\ABAFE_Models_Trainer\src\gui.py", line 1575, in update_test_bench_status
+    self.btn_tb_stop.setEnabled(running)
+                                ^^^^^^^
+NameError: name 'running' is not defined
+FATAL GUI ERROR: name 'running' is not defined
+Traceback (most recent call last):
+  File "D:\PROGRAMACION\Abafe_Models_Trainer\src\gui.py", line 2266, in <module>
+    window = LoRATrainerGUI()
+             ^^^^^^^^^^^^^^^^
+  File "D:\PROGRAMACION\Abafe_Models_Trainer\src\gui.py", line 256, in __init__
+    self.init_ui()
+  File "D:\PROGRAMACION\Abafe_Models_Trainer\src\gui.py", line 431, in init_ui
+    self.init_test_bench_tab()
+  File "D:\PROGRAMACION\Abafe_Models_Trainer\src\gui.py", line 854, in init_test_bench_tab
+    self.update_test_bench_status()
+  File "D:\PROGRAMACION\Abafe_Models_Trainer\src\gui.py", line 1575, in update_test_bench_status
+    self.btn_tb_stop.setEnabled(running)
+                                ^^^^^^^
+NameError: name 'running' is not defined

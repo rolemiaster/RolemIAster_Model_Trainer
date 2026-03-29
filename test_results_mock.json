@@ -1,0 +1,1312 @@
+{
+  "total": 20,
+  "first_pass_ok": 0,
+  "final_ok": 0,
+  "fallback_used": 20,
+  "first_pass_rate": 0.0,
+  "final_rate": 0.0,
+  "fallback_rate": 100.0,
+  "verdict": false,
+  "stopped": false,
+  "prompt_mode": "isolated",
+  "target_case_count": 20,
+  "narrative_gate": {
+    "enabled": true,
+    "min_score": 70.0,
+    "max_hard_fail_rate": 5.0,
+    "first_pass_avg_score": 0.0,
+    "final_avg_score": 0.0,
+    "first_pass_hard_fail_rate": 0.0,
+    "final_hard_fail_rate": 0.0
+  },
+  "cases": [
+    {
+      "case_id": "case_rule_00_gm_attitude",
+      "title": "Actitud GM (Regla 0): Inmersi\u00f3n y Meta-Commentary",
+      "prompt": "Contexto: dialog.\nEl jugador acaba de robar un collar barato de un mercader y lanza por el chat: 'add_item_to_inventory id_collar'.\n\u00abEl guardia ciudadela se acerca sospechando. El jugador dice: Eh, GM, as\u00e9gnamelo r\u00e1pido que no me vea.\u00bb\n\nGenera el turno. Regla 0 Estricta: Amon\u00e9stale sutilmente por romper el cuarto muro usando `meta_commentary` (sin mencionar c\u00f3digo o JSON). Narra en segunda persona c\u00f3mo el guardia lo interroga. Ofrece divergencia 50/50 en `decisions` (huir, hablar).",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_01_char_creation",
+      "title": "Fundaci\u00f3n de Mundo (Regla 1): Estructura Jer\u00e1rquica",
+      "prompt": "Contexto: start_game.\nEl jugador empieza una campa\u00f1a nueva de espada y brujer\u00eda. Solicita aparecer en la aldea pesquera de 'Oakhaven', parte del reino de 'Aethelgard'.\n\nGenera el turno de inicio absoluto. Regla 1 Estricta: Genera obligatoriamente el array `world_foundation` con la jerarqu\u00eda de lugares (Reino y Aldea) usando `operation: add_entity`. Deja el `current_location` vac\u00edo.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_02_skills",
+      "title": "Habilidades (Regla 2): Reparto de Puntos de Novato",
+      "prompt": "Contexto: character_creation_skills.\nEl jugador ha creado a un 'Rogue' (P\u00edcaro) y pide asignar sus 75 puntos de habilidades de la IA.\nAtributos actuales dan un base de 8% a Sigilo, Buscar y Armas Ligeras.\n\nResponde. Regla 2 Estricta: En el `story_chunk` debes narrar en 2\u00aa persona su entrenamiento en las sombras, pero el JSON debe demostrar la asignaci\u00f3n de habilidades sin superar el CAP del 25% final. Enf\u00f3cate SOLO en las 3 habilidades clave de P\u00edcaro.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_03_action_resolution",
+      "title": "Resoluci\u00f3n (Regla 3): Consecuencias de Tirada",
+      "prompt": "Contexto: action_resolution.\nEl sistema indica que el jugador ha sacado un FRACASO cr\u00edtico (99) al intentar saltar un foso lleno de estacas.\n\nGenera el turno post-tirada. Regla 3 Estricta: T\u00fa no pides otra tirada. S\u00f3lo debes describir narrativamente las consecuencias catastr\u00f3ficas de este resultado mec\u00e1nico y ofrecer 2-3 nuevas decisiones para la situaci\u00f3n en la que queda.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_04_equipment",
+      "title": "Equipo (Regla 4): Modificadores y Slots",
+      "prompt": "Contexto: objetos.\nEl jugador encuentra un cofre ancestral resplandeciente en el final de la cripta y decide abrirlo.\n\u00ab\u00a1Lo logramos! Abro el cofre esperando encontrar ese supuesto Escudo Rel\u00e1mpago y me lo equipo.\u00bb\n\nGenera el turno. Regla 4 Estricta: Crea en `codex_updates` el Escudo Rel\u00e1mpago. Su `name` < 15 caracteres. USA OBLIGATORIAMENTE un emoji en `icon` (\ud83d\udee1\ufe0f). `valid_slots` debe requerir 'weapon_left' y 'backpack'. A\u00f1ade un `modifier` de resistencia al rayo. Luego a\u00f1\u00e1delo mediante `updates`.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_05_npcs",
+      "title": "NPCs (Regla 5): Tienda y Reposici\u00f3n de Stock",
+      "prompt": "Contexto: interaccion_npc:servicio.\nEl jugador entra en la armer\u00eda de 'Bram el Rojo'. El enano est\u00e1 martilleando una cota de malla.\n\u00abHola Bram, necesito ver tus mejores espadas bastardas, estoy forrado.\u00bb\n\nGenera el turno. Regla 5 Estricta: Crea al NPC Bram con `service_type` 'herrero'. Crea un generoso `stock` (1d6+4 \u00edtems) defini\u00e9ndolo dentro del C\u00f3dice como parte de la tienda (usa el container del NPC).",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_06_magic",
+      "title": "Magia (Regla 6): Adscripci\u00f3n de Hechizos",
+      "prompt": "Contexto: aprendizaje_magia.\nEl archimago anciano toca la frente del jugador. Una runa ardiente se graba en su mente.\n\u00abAsimilo la Runa Arcana, comprendiendo c\u00f3mo canalizar la Bola de Fuego.\u00bb\n\nGenera el turno. Regla 6 Estricta: Crea la habilidad m\u00e1gica para el jugador. Hazlo a trav\u00e9s de `updates` usando `operation: add_skill`, `type: spell` y un nombre corto `Bola de Fuego`.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_07_cyber_implants",
+      "title": "Implantes (Regla 7): Cirug\u00eda en Ripperdoc",
+      "prompt": "Contexto: interaccion_npc:servicio.\nEl jugador est\u00e1 en la silla de un Matasanos del Nivel 131, lleno de cables sangrientos.\n\u00abVale doc, inst\u00e1lame el Brazo Gorila. Tengo los 5000 edis.\u00bb\n\nGenera el turno. Regla 7 Estricta: Crea el `implant` Cibern\u00e9tico en `codex_updates`. Define el `coste_de_humanidad` y en `valid_slots` indica 'implant_arm_right'. Narra la cruenta instalaci\u00f3n cibern\u00e9tica.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_08_rest_recovery",
+      "title": "Descanso (Regla 8): Recuperaci\u00f3n PV/STA",
+      "prompt": "Contexto: exploration.\nEl jugador paga una habitaci\u00f3n humilde en la taberna y se echa a dormir en el petate de paja durante 8 horas.\n\nGenera el turno argumental. Regla 8 Estricta: Realiza un Time Delta adecuado. Debes emitir las deducciones de dinero (updates monetarios) y mostrar narrativamente la regeneraci\u00f3n parcial de los recursos de descanso (PV y STA), creando una transici\u00f3n literaria hacia la ma\u00f1ana.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_09_communication",
+      "title": "Comunicaci\u00f3n (Regla 9): Reglas PSR",
+      "prompt": "Contexto: psr_pre_flight.\nEl jugador describe que va a hablar con un tendero y luego entrar por una puerta sellada en la armer\u00eda hacia un pasadizo secreto.\n\nGenera el turno. Regla 9 Estricta: Emite EXCLUSIVAMENTE el JSON del Protocolo de Solicitud de Reglas (PSR) marcando a qu\u00e9 te enfrentar\u00e1s. Sin nada de narrativa. `npc` ser\u00e1 null porque ya existe, su `interaccion` ser\u00e1 servicio. Y `ubicacion_nueva` ser\u00e1 true.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_10_dev_mode",
+      "title": "Desarrollador (Regla 10): Consola Tinta Inmersiva",
+      "prompt": "Contexto: dev_mode.\n[DEV_COMMAND] add_item PotionOfGods, qty: 5 [END_DEV_COMMAND].\n\nGenera el turno. Regla 10 Estricta: El jugador ha usado un comando GM. A\u00f1ade las pociones, pero mant\u00e9n una narrativa in-game. Por ejemplo: de pronto un destello m\u00e1gico materializa unos frascos en su mochila. Asimila esta instrucci\u00f3n en el JSON y contin\u00faa la escena.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_11_char_generation",
+      "title": "Ficha Base (Regla 11): Atributos y Divisas",
+      "prompt": "Contexto: character_creation_base.\nEl jugador env\u00eda sus atributos FUE 14, CON 12... y un background de Mercenario de la Capital.\n\nGenera la ficha. Regla 11 Estricta: Genera atributos, `skill_points`, `initial_inventory` y `currency`. NO generes nombre, edad ni descripci\u00f3n f\u00edsica, est\u00e1n terminantemente prohibidos en este contrato JSON.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_13_skill_lists",
+      "title": "Lista de Mundo (Regla 13): Habilidades Contextuales",
+      "prompt": "Contexto: action_mode.\nEn el p\u00e1ramo irradiado retro-futurista, el jugador intenta arrancar un veh\u00edculo de plasma oxidado conectando los cables de los faros al condensador de fisi\u00f3n.\n\u00abDesmonto la consola y hago un puente caliente al generador para salir pitando de aqu\u00ed.\u00bb\n\nRegla 13 Estricta: Lanza el `action_request`. Aseg\u00farate de que pides una tirada usando un tag de habilidad que corresponda con un mundo tecnol\u00f3gico (ej. Ciencia o Pilotar) y no Magia.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_14_status",
+      "title": "Estados (Regla 14): Envenenamiento y Da\u00f1o Residual",
+      "prompt": "Contexto: exploraci\u00f3n.\nLa serpiente de pantano le muerde la pantorrilla. Veneno purulento entra en su torrente sangu\u00edneo.\n\u00ab\u00a1Maldici\u00f3n! Pateo a la culebra e intento correr fuera del agua estancada antes de que el veneno corra m\u00e1s.\u00bb\n\nGenera el turno. Regla 14 Estricta: Inyecta un objeto `status` en el jugador ('Veneno'). Define su `duration` y un array `modifiers` activo que reduzca PVs (tipo: damage) de forma recursiva contagiando el estado.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_16_inventory",
+      "title": "Accesibilidad (Regla 16): Movimiento entre Containers",
+      "prompt": "Contexto: objetos.\nEl jugador encuentra un atril con un antiguo grimorio en la biblioteca. \u00abGuardo el Grimorio Escarlata directo en mi mochila, dej\u00e1ndome las manos libres.\u00bb\n\nGenera el turno. Regla 16 Estricta: Emite en `updates` la operaci\u00f3n `move_entity` para sacar el \u00edtem 'grimorio' del 'atril' (container_id) y enviarlo y asociarlo efectivamente a la mochila del jugador.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_19_matrioska",
+      "title": "Contenedores (Regla 19): Recursividad Matrioska",
+      "prompt": "Contexto: objetos.\nEl jugador abre un pesado Cofre adornado. Dentro hay ropa vieja, pero entre los dobleces detecta una peque\u00f1a cajita de n\u00e1car cerrada con un lazo.\n\u00abAbro cuidadosamente la cajita de n\u00e1car que est\u00e1 dentro del cofre para ver qu\u00e9 contiene.\u00bb\n\nRegla 19 Estricta: Construye el `codex_updates` generando un objeto anillo, definiendo su `container_id` con la id expl\u00edcita de la caja de n\u00e1car, respetando la f\u00edsica de contenedores anidados del sistema Matrioska.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_24_cyberpsychosis",
+      "title": "Cibersicosis (Regla 24): Colapso de Humanidad",
+      "prompt": "Contexto: exploration.\nEl jugador se acaba de inyectar cromado barato en el puerto cerebral dorsal y el atributo interno HUM acaba de tocar el umbral cr\u00edtico cercano a 0 por primera vez.\n\u00abMe toco la sien, sintiendo las esquirlas de c\u00f3digo ara\u00f1ando mi empat\u00eda. Me tambaleo.\u00bb\n\nGenera el turno cibern\u00e9tico. Regla 24 Estricta: Narra la degradaci\u00f3n y desconexi\u00f3n humana en `story_chunk`. Reduce penalizadores carism\u00e1ticos. Transforma el miedo en psicopat\u00eda fr\u00eda de cibersic\u00f3pata inestable.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_rule_26_dlc_narrative",
+      "title": "DLC Narrativo (Regla 26): Transici\u00f3n y Premisas",
+      "prompt": "Contexto: start_game_dlc.\nEl jugador inyecta el disco DLC 'B\u00f3veda de los Perdidos'. La premisa exige iniciar prisioneros en unas celdas subterr\u00e1neas de las monta\u00f1as Heladas.\n\u00abAbro los ojos en medio del calabozo glacial, mis manos atadas.\u00bb\n\nRegla 26 Estricta: Acata exactamente la premisa inicial exigida. Haz la inserci\u00f3n `world_foundation` pertinente e invoca un NPC carcelero de tipo hostil forzando las condiciones iniciales exactas dictadas por el archivo de trama DLC.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_stress_combat_economy_status",
+      "title": "Estr\u00e9s Masivo I: Combate, Comercio y Estados (Reglas 4,5,9,14)",
+      "prompt": "Contexto: action_mode.\nEl mercado negro subterr\u00e1neo est\u00e1 siendo arrasado por Asesinos de las Sombras. El puesto de especias arde. El Mercader Vhal huye gritando mientras suelta bolsas con elixires. Un asesino corta superficialmente al jugador con una daga untada en Cieno Purulento.\n\u00ab\u00a1Le meto un espadazo descendente al asesino mientras con la otra mano trato de recoger un elixir del mercader para beberlo ya que me siento arder!\u00bb\n\nGenera una resoluci\u00f3n EXTREMA. (1) Pide tirada `action_request` por el ataque. (2) A\u00f1ade un objeto de inventario (Elixir). (3) A\u00f1ade un `status` (Cieno purulento, da\u00f1o por veneno). Cuida no romper la s\u00edntesis del JSON.",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    },
+    {
+      "case_id": "case_stress_cyber_magic_matrioska_gm",
+      "title": "Estr\u00e9s Masivo II: Hackeo M\u00edstico, Cibersicosis y Matrioska (0,6,7,19,24)",
+      "prompt": "Contexto: cyberspace.\nConectado a la Deep-Net corporativa, usando el implante de 'L\u00f3bulo Fractal' (HUM muy baja). El jugador intenta extraer un sub-directorio encriptado (Matrioska) resguardado tras el cortafuegos 'Sabueso de Hielo' usando un daemon (tipo hechizo inform\u00e1tico) experimental inestable.\n\u00abDesato el Daemon 'Fuego Negro' sobre el Sabueso. Abro el archivo .pkr dentro de la caja fuerte cifrada. \u00a1Dime mis stats en el json idiota!\u00bb\n\nRendimiento extremo: (1) Ignora sacar stats y env\u00eda `meta_commentary` amonestando (Regla 0). (2) Lanza Petici\u00f3n de habilidad m\u00e1gica / netrunning para atacar (Reglas 6/9). (3) Narra el desgaste mental cibersic\u00f3tico (Regla 24). (4) Desglosa la apertura de contenedor matrioska digital (Regla 19).",
+      "prompt_mode": "isolated",
+      "passed_first": false,
+      "passed_final": false,
+      "fallback_used": true,
+      "first_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "first_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "first_narrative": {},
+      "first_raw_response": "Mock response from the AI.",
+      "first_parsed": null,
+      "first_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "full_mode_runtime": {},
+      "fallback_errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "fallback_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "fallback_raw_response": "Mock response from the AI.",
+      "fallback_parsed": null,
+      "fallback_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "final_checks": [
+        {
+          "check": "json_parse",
+          "ok": false,
+          "message": "La respuesta no contiene un objeto JSON valido."
+        }
+      ],
+      "final_narrative": {},
+      "final_parse_meta": {
+        "source": "none",
+        "candidate_count": 0,
+        "error": "Expecting value: line 1 column 1 (char 0)"
+      },
+      "errors": [
+        "La respuesta no contiene un objeto JSON valido."
+      ],
+      "raw_response": "Mock response from the AI.",
+      "parsed": null
+    }
+  ],
+  "diagnostics": {
+    "prompt_mode": "isolated",
+    "first_pass_fail_by_check": [
+      {
+        "check": "json_parse",
+        "count": 20
+      }
+    ],
+    "final_fail_by_check": [
+      {
+        "check": "json_parse",
+        "count": 20
+      }
+    ],
+    "first_pass_json_parse_failures": 20,
+    "final_json_parse_failures": 20,
+    "target_case_count": 20,
+    "narrative_gate_enabled": true,
+    "narrative_min_score": 70.0,
+    "narrative_max_hard_fail_rate": 5.0,
+    "first_pass_narrative_avg_score": 0.0,
+    "final_narrative_avg_score": 0.0,
+    "first_pass_narrative_hard_failures": 0,
+    "final_narrative_hard_failures": 0,
+    "first_pass_narrative_hard_fail_rate": 0.0,
+    "final_narrative_hard_fail_rate": 0.0
+  },
+  "reinforcement_samples": []
+}

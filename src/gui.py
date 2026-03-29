@@ -298,10 +298,16 @@ class LoRATrainerGUI(QMainWindow):
                     self.combo_thinking_mode.setCurrentIndex(idx)
 
             if hasattr(self, "combo_narrative_style"):
-                saved_narrative = str(cfg.get("narrative_style", "literary")).strip().lower()
+                saved_narrative = str(cfg.get("narrative_style", "functional")).strip().lower()
                 idx = self.combo_narrative_style.findData(saved_narrative)
                 if idx >= 0:
                     self.combo_narrative_style.setCurrentIndex(idx)
+
+            if hasattr(self, "combo_train_on_responses"):
+                saved_toro = str(cfg.get("train_on_responses", "on")).strip().lower()
+                idx = self.combo_train_on_responses.findData(saved_toro)
+                if idx >= 0:
+                    self.combo_train_on_responses.setCurrentIndex(idx)
 
             if hasattr(self, "txt_tb_model"):
                 self.txt_tb_model.setText(str(cfg.get("testbench_model_ref", "")).strip())
@@ -389,6 +395,7 @@ class LoRATrainerGUI(QMainWindow):
                 "learning_rate": self.spin_lr.value(),
                 "thinking_mode": self.combo_thinking_mode.currentData() if hasattr(self, "combo_thinking_mode") else "suppress",
                 "narrative_style": self.combo_narrative_style.currentData() if hasattr(self, "combo_narrative_style") else "literary",
+                "train_on_responses": self.combo_train_on_responses.currentData() if hasattr(self, "combo_train_on_responses") else "on",
                 "md_file": str(self.md_file) if self.md_file else "",
                 "model_file": str(self.model_file) if self.model_file else "",
                 "testbench_model_ref": self.txt_tb_model.text().strip() if hasattr(self, "txt_tb_model") else "",
@@ -599,6 +606,16 @@ class LoRATrainerGUI(QMainWindow):
         row_narrative.addStretch()
         params_layout.addLayout(row_narrative)
 
+        row_toro = QHBoxLayout()
+        row_toro.addWidget(QLabel(self.tr("train_on_responses_label")))
+        self.combo_train_on_responses = QComboBox()
+        self.combo_train_on_responses.addItem(self.tr("train_on_responses_on"), "on")
+        self.combo_train_on_responses.addItem(self.tr("train_on_responses_off"), "off")
+        self.combo_train_on_responses.setToolTip(self.tr("train_on_responses_tooltip"))
+        row_toro.addWidget(self.combo_train_on_responses)
+        row_toro.addStretch()
+        params_layout.addLayout(row_toro)
+
         self.group_params.setLayout(params_layout)
         layout.addWidget(self.group_params)
         
@@ -640,6 +657,13 @@ class LoRATrainerGUI(QMainWindow):
         self.btn_process.setStyleSheet("font-weight: bold; font-size: 14px; background-color: #28a745; color: white; border-radius: 5px; padding: 5px;")
         self.btn_process.clicked.connect(self.start_processing_direct)
         layout.addWidget(self.btn_process)
+
+        # Generate Dataset Button
+        self.btn_generate_dataset = QPushButton(self.tr("generate_dataset_btn"))
+        self.btn_generate_dataset.setMinimumHeight(35)
+        self.btn_generate_dataset.setStyleSheet("font-weight: bold; background-color: #6f42c1; color: white; border-radius: 5px; padding: 5px;")
+        self.btn_generate_dataset.clicked.connect(self.generate_dataset)
+        layout.addWidget(self.btn_generate_dataset)
         
         # Console
         self.group_console = QGroupBox(self.tr("console_section"))
@@ -2683,8 +2707,8 @@ class LoRATrainerGUI(QMainWindow):
         
         name = str(self.model_file).lower()
         
-        # Micro: < 4B (0.5b, 1.5b, 1b, 3b)
-        if re.search(r'\b(0\.5b|1\.5b|1b|3b|mini)\b', name):
+        # Micro: < 4B (0.5b, 1.5b, 1b, 2b, 3b)
+        if re.search(r'\b(0\.5b|1\.5b|1b|2b|3b|mini)\b', name):
             return "micro"
         # Small: 4B - 8B (4b, 7b, 8b)
         if re.search(r'\b(4b|7b|8b)\b', name):
@@ -2760,8 +2784,16 @@ class LoRATrainerGUI(QMainWindow):
             # Effective batch sin FLA: 4*4=16. Rank 8 fue optimo incluso para 8B (Reddit).
             rank, alpha, batch, lr, epochs = 8, 16, 4, 0.0001, 2
             
-        # Estilo narrativo: modelos pequeños necesitan prosa inyectada, grandes ya la tienen latente
-        narrative_style = "literary" if size_cat in ("micro", "small") else "functional"
+        # Estilo narrativo: siempre funcional. El SFT enseña estructura, no estilo.
+        # Los modelos ya tienen creatividad latente del pre-training; inyectarles prosa los sesga.
+        narrative_style = "functional"
+
+        # Train on responses only: OFF para micro (<4B), ON para 4B+.
+        # Evidencia: Exp1 (Mar 2026) - modelos pequeños necesitan loss completo.
+        train_on_responses = "off" if size_cat == "micro" else "on"
+
+        # Think-Suppression: siempre suprimir para RolemIAster (JSON puro).
+        thinking_mode = "suppress"
 
         self.spin_rank.setValue(rank)
         self.spin_alpha.setValue(alpha)
@@ -2773,6 +2805,16 @@ class LoRATrainerGUI(QMainWindow):
             idx = self.combo_narrative_style.findData(narrative_style)
             if idx >= 0:
                 self.combo_narrative_style.setCurrentIndex(idx)
+
+        if hasattr(self, "combo_train_on_responses"):
+            idx = self.combo_train_on_responses.findData(train_on_responses)
+            if idx >= 0:
+                self.combo_train_on_responses.setCurrentIndex(idx)
+
+        if hasattr(self, "combo_thinking_mode"):
+            idx = self.combo_thinking_mode.findData(thinking_mode)
+            if idx >= 0:
+                self.combo_thinking_mode.setCurrentIndex(idx)
 
         self.log(self.tr("log_smart_config_applied").format(size=size_cat.upper(), rank=rank, alpha=alpha, batch=batch, epochs=epochs, lr=lr))
 
@@ -2840,9 +2882,13 @@ class LoRATrainerGUI(QMainWindow):
         if hasattr(self, "combo_thinking_mode"):
             thinking_mode = self.combo_thinking_mode.currentData() or "suppress"
 
-        narrative_style = "literary"
+        narrative_style = "functional"
         if hasattr(self, "combo_narrative_style"):
-            narrative_style = self.combo_narrative_style.currentData() or "literary"
+            narrative_style = self.combo_narrative_style.currentData() or "functional"
+
+        train_on_responses = "on"
+        if hasattr(self, "combo_train_on_responses"):
+            train_on_responses = self.combo_train_on_responses.currentData() or "on"
 
         return {
             "rank": self.spin_rank.value(),
@@ -2854,6 +2900,7 @@ class LoRATrainerGUI(QMainWindow):
             "lang": getattr(self, "current_lang", "en"),
             "thinking_mode": thinking_mode,
             "narrative_style": narrative_style,
+            "train_on_responses": train_on_responses,
         }
 
     # --- QUEUE SYSTEM ---
@@ -2926,7 +2973,25 @@ class LoRATrainerGUI(QMainWindow):
                 epochs=job["params"]["epochs"]
             )
             item = QListWidgetItem(text)
-            
+
+            p = job["params"]
+            thinking_label = self.tr("thinking_mode_suppress") if p.get("thinking_mode") == "suppress" else self.tr("thinking_mode_native")
+            narrative_label = self.tr("narrative_style_functional") if p.get("narrative_style") == "functional" else self.tr("narrative_style_literary")
+            toro_label = self.tr("train_on_responses_on") if p.get("train_on_responses") == "on" else self.tr("train_on_responses_off")
+            tooltip = (
+                f"Modelo: {job['model'].name}\n"
+                f"Reglas: {job['md'].name}\n"
+                f"─────────────────────\n"
+                f"LoRA Rank: {p.get('rank')}  |  Alpha: {p.get('alpha')}\n"
+                f"Batch Size: {p.get('batch_size')}  |  Epochs: {p.get('epochs')}\n"
+                f"Learning Rate: {p.get('learning_rate')}\n"
+                f"─────────────────────\n"
+                f"Razonamiento: {thinking_label}\n"
+                f"Estilo Narrativo: {narrative_label}\n"
+                f"Loss: {toro_label}"
+            )
+            item.setToolTip(tooltip)
+
             # Colores ajustados para legibilidad en tema oscuro
             # Usamos colores más oscuros de fondo y nos aseguramos que el texto sea blanco (por stylesheet)
             if job['status'] == 'processing':
@@ -3076,6 +3141,30 @@ class LoRATrainerGUI(QMainWindow):
     def on_direct_finished(self, success, message):
         self.log(message)
         self.btn_process.setEnabled(True)
+
+    def generate_dataset(self):
+        if not self.md_file:
+            QMessageBox.warning(self, self.tr("dlg_error_title"), self.tr("dlg_no_md_file"))
+            return
+
+        output_path = OUTPUT_DIR / "training_dataset.jsonl"
+        self.log(self.tr("log_generating_dataset"))
+        self.btn_generate_dataset.setEnabled(False)
+
+        try:
+            from core.preparar_dataset import generate_robust_dataset
+            success = generate_robust_dataset(str(self.md_file), str(output_path))
+            if success:
+                self.log(self.tr("log_dataset_generated").format(path=str(output_path)))
+                QMessageBox.information(self, self.tr("dlg_success_title"), self.tr("dlg_dataset_generated"))
+            else:
+                self.log(self.tr("log_dataset_error"))
+                QMessageBox.critical(self, self.tr("dlg_error_title"), self.tr("dlg_dataset_failed"))
+        except Exception as e:
+            self.log(f"[ERROR] {e}")
+            QMessageBox.critical(self, self.tr("dlg_error_title"), str(e))
+        finally:
+            self.btn_generate_dataset.setEnabled(True)
 
     def closeEvent(self, event):
         if self.thread and self.thread.isRunning():
