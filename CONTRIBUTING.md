@@ -20,9 +20,9 @@ Antes de clonar el repositorio, asegúrate de tener instalados los siguientes pr
     - Se requiere para compilar extensiones de C++ y Triton kernels.
     - [Descargar Visual Studio 2022 Community](https://visualstudio.microsoft.com/vs/community/).
     - **Carga de trabajo obligatoria:** "Desarrollo para el escritorio con C++" (Desktop development with C++).
-3.  **NVIDIA CUDA Toolkit 12.1:**
-    - El proyecto está fijado a CUDA 12.1 para compatibilidad con los binarios de PyTorch.
-    - [Descargar CUDA Toolkit 12.1](https://developer.nvidia.com/cuda-12-1-0-download-archive).
+3.  **NVIDIA CUDA Toolkit 12.8:**
+    - El proyecto está fijado a CUDA 12.8 para compatibilidad con sm_120/reserved Blackwell GPUs y los binarios de PyTorch cu128.
+    - [Descargar CUDA Toolkit 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive).
 4.  **Git:**
     - Para la gestión del código.
     - [Descargar Git](https://git-scm.com/download/win).
@@ -61,7 +61,7 @@ Si deseas generar el ejecutable del programa para distribución:
 ## ⚠️ Solución de Problemas Comunes
 
 - **"No se encuentra el compilador MSVC":** Revisa que Visual Studio 2022 esté instalado y que la ruta en `run_trainer.bat` (línea 13) coincida con tu ubicación de instalación.
-- **"CUDA_HOME no encontrado":** Verifica que CUDA 12.1 esté en `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1`. El script intenta forzar esta ruta por defecto.
+- **"CUDA_HOME no encontrado"**: Verifica que CUDA 12.8 esté en `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8`. El script intenta forzar esta ruta por defecto.
 - **Errores de Memoria (OOM):** Si al probar el entrenador recibes errores de memoria, intenta reducir el `Batch Size` a 1 o el `LoRA Rank` a 8 en la interfaz del GUI.
 
 ## 🔬 Banco de Pruebas

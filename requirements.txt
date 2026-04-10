@@ -25,9 +25,9 @@ psutil==7.2.2
 requests==2.32.5
 
 # --- Dependencias complejas (instaladas por run_trainer.bat con versión fijada) ---
-# torch==2.5.1+cu121         (Requiere --index-url CUDA)
-# torchaudio==2.5.1+cu121    (Requiere --index-url CUDA)
-# torchvision==0.20.1+cu121  (Requiere --index-url CUDA)
+# torch==2.5.1+cu128         (Requiere --index-url CUDA)
+# torchaudio==2.5.1+cu128    (Requiere --index-url CUDA)
+# torchvision==0.20.1+cu128  (Requiere --index-url CUDA)
 # torchao==0.16.0            (Instalado con torch)
 # triton-windows==3.6.0.post25
 # unsloth==2026.3.4          (Requiere Torch previo)

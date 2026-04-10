@@ -13,7 +13,8 @@ REM Sin esto, Triton no encuentra compilador C++ y FLA cae silenciosamente a CPU
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 set PYTHONUTF8=1
 set DISTUTILS_USE_SDK=1
-set CUDA_HOME=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1
+set CUDA_HOME=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8
+set PATH=%CUDA_HOME%\bin;%PATH%
 
 REM --- 1. DETECT PYTHON 3.12 ---
 set "PYTHON_BOOTSTRAP="
@@ -68,10 +69,11 @@ if errorlevel 1 goto :pip_error
 "%VENV_PYTHON%" -m pip install -r requirements.txt
 if errorlevel 1 goto :pip_error
 
-REM [NIGHTLY PROTECTION] Hemos comentado las siguientes lineas para evitar destruir
-REM el entorno PyTorch 2.12+cu128 localmente compilado en MSVC.
-REM "%VENV_PYTHON%" -m pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
-REM if errorlevel 1 goto :pip_error
+REM [CUDA 12.8 / sm_120] Use PyTorch cu128 builds for compatibility with newer NVIDIA architectures.
+REM Uncomment the option below that matches your installation preference.
+"%VENV_PYTHON%" -m pip install torch==2.5.1+cu128 torchvision==0.20.1+cu128 torchaudio==2.5.1+cu128 --index-url https://download.pytorch.org/whl/cu128
+REM "%VENV_PYTHON%" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+if errorlevel 1 goto :pip_error
 
 REM Unsloth â€” commit fijado, NO latest
 REM "%VENV_PYTHON%" -m pip install "unsloth==2026.3.4" --no-deps

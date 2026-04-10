@@ -1,35 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
-
-datas = [('src/i18n', 'src/i18n'), ('README_UI.md', '.')]
-binaries = [('D:\\PROGRAMACION\\ABAFE_Models_Trainer\\triton-windows\\python\\triton\\_C\\libtriton.pyd', 'triton/_C')]
-hiddenimports = []
-tmp_ret = collect_all('fla')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('causal_conv1d')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('xformers')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('triton')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('unsloth_zoo')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('unsloth')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('trl')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['src\\gui.py'],
-    pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    ['src/gui.py'],
+    pathex=['/workspaces/RolemIAster_Model_Trainer/.venv/lib/python3.12/site-packages', '/workspaces/RolemIAster_Model_Trainer/src'],
+    binaries=[],
+    datas=[('src/i18n', 'src/i18n'), ('README_UI.md', '.')],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['llama_cpp'],
+    excludes=[],
     noarchive=False,
     optimize=0,
 )
@@ -45,13 +26,12 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='NONE',
 )
 coll = COLLECT(
     exe,
